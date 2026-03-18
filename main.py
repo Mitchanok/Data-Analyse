@@ -6,9 +6,12 @@ import csv
 import os
 from datetime import datetime
 from tkinterdnd2 import TkinterDnD, DND_FILES 
+
+# De nieuwe architectuur imports
+from centrale_engine import CentraleEngine
 from compliance_engine import ComplianceEngine
 
-# WCAG-Compliant kleuren (Geïntegreerd met jouw thema)
+# WCAG-Compliant kleuren
 COLOR_PASS = "#388E3C"
 COLOR_FAIL = "#D32F2F"
 COLOR_WARN = "#F57C00"
@@ -31,7 +34,7 @@ class TkinterDnD_CTk(ctk.CTk, TkinterDnD.DnDWrapper):
 class ComplianceApp(TkinterDnD_CTk):
     def __init__(self):
         super().__init__()
-        self.title("Compliance Analyzer Pro V1.0 - Enterprise Edition")
+        self.title("Compliance Analyzer Pro V2.0 - Enterprise Edition")
         self.geometry("1100x750") 
         self.minsize(950, 650)
         self.configure(fg_color=COLOR_BG_DEEP) 
@@ -231,8 +234,18 @@ class ComplianceApp(TkinterDnD_CTk):
         self.progress.pack(fill="x", pady=20)
         self.progress.set(0)
         
-        engine = ComplianceEngine(list(self.selected_local_paths), self.selected_sharepoint_sites, active_modules)
-        threading.Thread(target=engine.process, args=(self.q,), daemon=True).start()
+        # --- ENTERPRISE ARCHITECTUUR UPDATE ---
+        # 1. Maak de gewenste engines aan
+        comp_engine = ComplianceEngine(active_modules)
+        active_engines = [comp_engine]
+        
+        # (In de toekomst voeg je hier eenvoudig toe: active_engines.append(QualityEngine()))
+
+        # 2. Geef de engines door aan de Centrale Scanner
+        scanner = CentraleEngine(list(self.selected_local_paths), self.selected_sharepoint_sites, active_engines)
+        
+        # 3. Start de scan op de achtergrond
+        threading.Thread(target=scanner.process, args=(self.q,), daemon=True).start()
         self.check_queue()
 
     def check_queue(self):
@@ -269,16 +282,14 @@ class ComplianceApp(TkinterDnD_CTk):
         for scores in domain_dict.values():
             if not scores: continue
             
-            # Zet de scores (die mogelijk tekst of procenten zijn) veilig om naar echte getallen
             numeric_scores = []
             for s in scores:
                 if isinstance(s, str):
-                    # Haal eventuele % tekens weg voor de zekerheid
                     s = s.replace('%', '').strip()
                 try:
                     numeric_scores.append(float(s))
                 except ValueError:
-                    pass # Negeer foute/lege waardes zoals "N/A"
+                    pass 
             
             if numeric_scores:
                 valid_scores.append(sum(numeric_scores) / len(numeric_scores))
@@ -394,21 +405,17 @@ class ComplianceApp(TkinterDnD_CTk):
         for mod, scores in domain_dict.items():
             if not scores: continue 
             
-            # --- NIEUWE VEILIGE BEREKENING PER MODULE ---
             numeric_scores = []
             for s in scores:
                 try:
-                    # Forceer naar tekst, strip de % en probeer er een getal van te maken
                     val = str(s).replace('%', '').strip()
                     numeric_scores.append(float(val))
                 except ValueError:
-                    pass # Negeer foute/lege waardes zoals "N/A"
+                    pass 
             
-            # Als er na het filteren geen geldige getallen over zijn, sla deze module over
             if not numeric_scores: continue
             
             mod_avg = sum(numeric_scores) / len(numeric_scores)
-            # --------------------------------------------
             
             container = ctk.CTkFrame(body, fg_color="transparent")
             container.pack(fill="x", pady=5)
@@ -456,13 +463,11 @@ class ComplianceApp(TkinterDnD_CTk):
             btn_toggle.pack(side="right", padx=10)
 
     def export_to_csv(self):
-        """Exporteert de data naar CSV."""
         results = self.analysis_data.get("results", [])
         if not results:
             messagebox.showinfo("Export", "Geen data om te exporteren.")
             return
 
-        # Vraag de gebruiker waar hij het bestand wil opslaan
         filepath = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV bestanden", "*.csv"), ("Alle bestanden", "*.*")],
@@ -470,19 +475,15 @@ class ComplianceApp(TkinterDnD_CTk):
         )
 
         if not filepath:
-            return # Gebruiker heeft op 'Annuleren' geklikt
+            return 
 
-        # 1. Genereer de datumstempel van dit exacte moment
         nu_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # 2. Injecteer de Datum in elke rij van de resultaten
         for row in results:
             row['ScanDatum'] = nu_str
 
-        # 3. Zet de ScanDatum helemaal vooraan in de kolom-headers
         headers = ['ScanDatum'] + [k for k in results[0].keys() if k != 'ScanDatum']
 
-        # 4. Schrijf het bestand weg (met puntkomma als scheidingsteken voor Europese Excel/Power BI)
         try:
             with open(filepath, mode='w', newline='', encoding='utf-8-sig') as file:
                 writer = csv.DictWriter(file, fieldnames=headers, delimiter=';')
