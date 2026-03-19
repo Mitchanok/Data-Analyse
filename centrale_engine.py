@@ -14,7 +14,7 @@ class CentraleEngine:
         self.file_registry = {} 
         self.sp_bibliotheken_tracker = {}
 
-        # --- DATA QUALITY & SECURITY BASELINES (Verplaatst vanuit Compliance Engine) ---
+        
         self.ALLOWED_SP_EXTS = {'.docx', '.xlsx', '.pptx', '.pdf', '.txt'}
         self.RISKY_EXTS = {'.exe', '.bat', '.msi', '.ps1', '.vbs', '.cmd', '.sh', '.scr'}
         self.FORBIDDEN_CHARS = set('/\\:*?"<>| !+@')
