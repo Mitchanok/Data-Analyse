@@ -3,6 +3,8 @@ import io
 import time
 from office365.sharepoint.client_context import ClientContext
 from requests_negotiate_sspi import HttpNegotiateAuth
+#Detecteren van lege velden (NULL-waarden) in datasets om de compleetheid van de informatie te garanderen.
+
 
 class CentraleEngine:
     def __init__(self, local_paths, sharepoint_sites, active_engines):
