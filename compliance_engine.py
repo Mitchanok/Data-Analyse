@@ -1,6 +1,6 @@
 import re
-import os
 import time
+import os
 import PyPDF2
 import docx
 import openpyxl
@@ -9,68 +9,36 @@ from datetime import datetime, timezone
 
 class ComplianceEngine:
     def __init__(self, active_modules):
-        self.active_modules = active_modules
-        self.hard_rules = ["Security (Risico's)", "Data Duplicatie", "Locatie Beleid"]
-        # Exporteer de domeinen zodat de CentraleEngine weet wat hij in het dashboard moet tekenen
-        self.domains = self.hard_rules + active_modules
-        
-        self.ALLOWED_SP_EXTS = {'.docx', '.xlsx', '.pptx', '.pdf', '.txt'}
-        self.RISKY_EXTS = {'.exe', '.bat', '.msi', '.ps1', '.vbs', '.cmd', '.sh', '.scr'}
-        self.FORBIDDEN_CHARS = set('/\\:*?"<>| !+@')
+        # Deze engine bemoeit zich niet meer met Security of Locatie.
+        self.domains = active_modules
 
-    def analyze(self, item, stream, is_duplicate):
+    def analyze(self, item, stream):
         scores = {mod: "N/A (Overgeslagen)" for mod in self.domains}
         reden = []
         
-        filename = item["name"]
-        filename_lower = filename.lower()
+        filename_lower = item["name"].lower()
         extension = item["extension"]
-        mode = item["mode"]
         in_werkomgeving = item.get("in_werkomgeving", False)
 
-        # 1. BASELINE
-        scores["Security (Risico's)"] = 100
-        scores["Locatie Beleid"] = 100
-        scores["Data Duplicatie"] = 100
-
-        # 2. HARDE REGELS (Ongeacht map-locatie)
-        if extension in self.RISKY_EXTS:
-            scores["Security (Risico's)"] = 0
-            reden.append("🚨 KRITIEK: Schadelijk bestand.")
-
-        if mode == "sp" and extension not in self.ALLOWED_SP_EXTS:
-            scores["Locatie Beleid"] = 0
-            reden.append(f"Locatie: Extensie {extension} mag niet op SP.")
-        elif mode == "local":
-            is_large_file = item["size"] >= (2 * 1024 * 1024 * 1024)
-            if extension in self.ALLOWED_SP_EXTS and not is_large_file:
-                scores["Locatie Beleid"] = 0
-                reden.append("Locatie: Bestand kan op SP en hoort niet lokaal.")
-
-        if is_duplicate:
-            scores["Data Duplicatie"] = 0
-            reden.append("Duplicatie: Bestand bestaat lokaal én op SP.")
-        elif scores["Locatie Beleid"] == 0:
-            scores["Data Duplicatie"] = 0
-            reden.append("Duplicatie: Faalt door onjuiste basislocatie.")
-
-        # 3. OPTIONELE REGELS (Met Data Quality context)
-        if "Naamgeving" in self.active_modules:
+        # 1. NAAMGEVING CHECK
+        if "Naamgeving" in self.domains:
             if in_werkomgeving:
                 scores["Naamgeving"] = "N/A (Werkomgeving)"
-            elif any(c in filename for c in self.FORBIDDEN_CHARS):
+            elif item.get("has_forbidden_chars", False):
                 scores["Naamgeving"] = 0
                 reden.append("Naamgeving: Bevat verboden tekens.")
             elif not re.match(r"^\d{8}_[^_]+_[^_]+_[^_]+_[^_]+\.[a-zA-Z0-9]+$", filename_lower):
                 scores["Naamgeving"] = 0
-                reden.append("Naamgeving: Fout format.")
+                reden.append("Naamgeving: Fout format (YYYYMMDD_Rubricering_Afdeling_Onderwerp_Versie).")
             else:
                 scores["Naamgeving"] = 100
 
-        is_readable_doc = extension in self.ALLOWED_SP_EXTS
+        # Pre-checks voor de inhoudelijke modules
+        is_readable_doc = item.get("is_readable_doc", False)
         file_is_locked = stream is None
 
-        if "Metadata" in self.active_modules:
+        # 2. METADATA CHECK
+        if "Metadata" in self.domains:
             if not is_readable_doc:
                 scores["Metadata"] = "N/A"
             elif in_werkomgeving:
@@ -84,7 +52,8 @@ class ComplianceEngine:
                 scores["Metadata"] = 0
                 reden.append("Metadata: Auteur/Status ontbreekt.")
 
-        if "Rubricering" in self.active_modules:
+        # 3. RUBRICERING CHECK
+        if "Rubricering" in self.domains:
             if not is_readable_doc:
                 scores["Rubricering"] = "N/A"
             elif in_werkomgeving:
@@ -106,14 +75,15 @@ class ComplianceEngine:
                     scores["Rubricering"] = 0
                     reden.append("Rubricering: Document leeg of scanbaar als plaatje.")
 
-        if "Bewaartermijn" in self.active_modules:
+        # 4. BEWAARTERMIJN CHECK
+        if "Bewaartermijn" in self.domains:
             age_years = self._calculate_age(item)
             if age_years > 5:
                 scores["Bewaartermijn"] = 0
                 reden.append(f"VNG: Te oud ({age_years:.1f} jaar).")
             else: scores["Bewaartermijn"] = 100
 
-        # QA Check: Bereid stream voor op een eventuele VOLGENDE engine (zoals de QualityEngine)
+        # Bereid de stream voor op de volgende engine (belangrijk als we de QualityEngine toevoegen)
         if stream:
             try: stream.seek(0)
             except Exception: pass
