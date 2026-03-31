@@ -91,7 +91,7 @@ from tkinterdnd2 import TkinterDnD
 # Engines
 from centrale_engine import Centrale_Engine
 from compliance_engine import ComplianceEngine
-#from Quality_engine import QualityEngine
+from KwaliteitEngine import QualityEngine
 
 # Frames
 from home import AuthFrame
