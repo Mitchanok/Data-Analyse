@@ -10,6 +10,7 @@ from tkinterdnd2 import TkinterDnD, DND_FILES
 # De nieuwe architectuur imports
 from centrale_engine import CentraleEngine
 from compliance_engine import ComplianceEngine
+from quality_engine import KwaliteitEngine
 
 # WCAG-Compliant kleuren
 COLOR_PASS = "#388E3C"
@@ -237,7 +238,8 @@ class ComplianceApp(TkinterDnD_CTk):
         # --- ENTERPRISE ARCHITECTUUR UPDATE ---
         # 1. Maak de gewenste engines aan
         comp_engine = ComplianceEngine(active_modules)
-        active_engines = [comp_engine]
+        quality_engine = KwaliteitEngine()
+        active_engines = [comp_engine, quality_engine]
         
         # (In de toekomst voeg je hier eenvoudig toe: active_engines.append(QualityEngine()))
 
