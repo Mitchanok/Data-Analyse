@@ -7,6 +7,9 @@ import os
 from datetime import datetime
 from tkinterdnd2 import TkinterDnD, DND_FILES 
 
+# Importeer je nieuwe dashboard
+from dashboard import DashboardWindow
+
 # De nieuwe architectuur imports
 from centrale_engine import CentraleEngine
 from compliance_engine import ComplianceEngine
@@ -239,8 +242,6 @@ class ComplianceApp(TkinterDnD_CTk):
         comp_engine = ComplianceEngine(active_modules)
         active_engines = [comp_engine]
         
-        # (In de toekomst voeg je hier eenvoudig toe: active_engines.append(QualityEngine()))
-
         # 2. Geef de engines door aan de Centrale Scanner
         scanner = CentraleEngine(list(self.selected_local_paths), self.selected_sharepoint_sites, active_engines)
         
@@ -297,170 +298,15 @@ class ComplianceApp(TkinterDnD_CTk):
         return sum(valid_scores) / len(valid_scores) if valid_scores else -1
 
     def show_dashboard(self):
+        # Reset de laadbalk en knop
         self.reset_ui()
         if not self.winfo_exists(): return
         
+        # Haal de projectnaam op (of gebruik een standaardnaam)
         project_naam = self.entry_project.get().strip() or "Naamloze_Scan"
         
-        local_avg = self._calc_average(self.analysis_data.get("domain_scores_local", {}))
-        sp_avg = self._calc_average(self.analysis_data.get("domain_scores_sp", {}))
-        
-        totaal_scores = [s for s in [local_avg, sp_avg] if s != -1]
-        totaal_avg = sum(totaal_scores) / len(totaal_scores) if totaal_scores else -1
-        
-        dash = ctk.CTkToplevel(self)
-        dash.title(f"Compliance Rapport - {project_naam}")
-        dash.geometry("950x850")
-        dash.configure(fg_color=COLOR_BG_DEEP) 
-        
-        dash.transient(self)
-        dash.grab_set()
-        dash.focus_force()
-        
-        head = ctk.CTkFrame(dash, height=100, corner_radius=0, fg_color=COLOR_BG_DEEP)
-        head.pack(fill="x")
-        ctk.CTkLabel(head, text=f"Rapport: {project_naam}", font=("Segoe UI", 18, "bold"), text_color="white").pack(pady=20)
-
-        nav_frame = ctk.CTkFrame(dash, fg_color="transparent")
-        nav_frame.pack(fill="x", pady=10, padx=20)
-
-        self.view_total = ctk.CTkFrame(dash, fg_color="transparent")
-        self.view_sp = ctk.CTkFrame(dash, fg_color="transparent")
-        self.view_local = ctk.CTkFrame(dash, fg_color="transparent")
-
-        def switch_tab(btn_active, view_active):
-            for btn in [btn_total, btn_sp, btn_local]:
-                btn.configure(fg_color=COLOR_BG_LIGHT, text_color="white")
-            btn_active.configure(fg_color=COLOR_ACCENT, text_color="black")
-            
-            self.view_total.pack_forget()
-            self.view_sp.pack_forget()
-            self.view_local.pack_forget()
-            view_active.pack(fill="both", expand=True, padx=20, pady=5)
-
-        btn_total = ctk.CTkButton(nav_frame, text="Totaal Overzicht", font=("Segoe UI", 14, "bold"), command=lambda: switch_tab(btn_total, self.view_total))
-        btn_total.pack(side="left", expand=True, padx=5)
-
-        btn_sp = ctk.CTkButton(nav_frame, text="SharePoint", font=("Segoe UI", 14, "bold"), command=lambda: switch_tab(btn_sp, self.view_sp))
-        btn_sp.pack(side="left", expand=True, padx=5)
-
-        btn_local = ctk.CTkButton(nav_frame, text="Lokale Schijf", font=("Segoe UI", 14, "bold"), command=lambda: switch_tab(btn_local, self.view_local))
-        btn_local.pack(side="left", expand=True, padx=5)
-
-        risico_bestanden = [res["Naam"] for res in self.analysis_data.get("results", []) if "🚨 KRITIEK" in res.get("Reden", "")]
-        
-        if risico_bestanden:
-            alert_frame = ctk.CTkFrame(dash, fg_color="#7f1d1d", corner_radius=10, border_width=2, border_color="#ef4444")
-            alert_frame.pack(fill="x", padx=20, pady=(15, 0))
-            
-            ctk.CTkLabel(alert_frame, text="🚨 KRITIEKE BEVEILIGINGSWAARSCHUWING 🚨", font=("Segoe UI Black", 18), text_color="white").pack(pady=(15, 5))
-            ctk.CTkLabel(alert_frame, text="De volgende schadelijke bestanden zijn gevonden en blokkeren compliance. DIRECT VERWIJDEREN:", font=("Segoe UI", 14, "bold"), text_color="#fca5a5").pack(pady=0)
-            
-            toon_bestanden = risico_bestanden[:5]
-            files_text = "\n".join([f"• {f}" for f in toon_bestanden])
-            if len(risico_bestanden) > 5:
-                files_text += f"\n... en nog {len(risico_bestanden) - 5} andere(n). Zie CSV export."
-                
-            ctk.CTkLabel(alert_frame, text=files_text, font=("Consolas", 14), text_color="white", justify="left").pack(pady=(10, 15), padx=20)
-
-        all_keys = set(self.analysis_data["domain_scores_local"].keys()) | set(self.analysis_data["domain_scores_sp"].keys())
-        combined_domains = {mod: [] for mod in all_keys}
-        
-        for mod in all_keys:
-            combined_domains[mod].extend(self.analysis_data["domain_scores_local"].get(mod, []))
-            combined_domains[mod].extend(self.analysis_data["domain_scores_sp"].get(mod, []))
-
-        self._build_tab_content(self.view_total, totaal_avg, combined_domains)
-        self._build_tab_content(self.view_sp, sp_avg, self.analysis_data.get("domain_scores_sp", {}))
-        self._build_tab_content(self.view_local, local_avg, self.analysis_data.get("domain_scores_local", {}))
-
-        switch_tab(btn_total, self.view_total)
-
-        ctk.CTkButton(dash, text="📥 Exporteer Data (CSV)", font=("Segoe UI Black", 14), text_color="#18181b", height=50, command=self.export_to_csv).pack(fill="x", padx=20, pady=20)
-
-    def _get_module_reasons(self, module_name):
-        reasons_found = set()
-        keyword = module_name.split()[0] 
-        
-        for res in self.analysis_data.get("results", []):
-            reden_string = res.get("Reden", "")
-            if keyword in reden_string:
-                parts = reden_string.split(" | ")
-                for part in parts:
-                    if keyword in part:
-                        reasons_found.add(part)
-        return list(reasons_found)
-
-    def _build_tab_content(self, parent_frame, avg_score, domain_dict):
-        if avg_score == -1:
-            ctk.CTkLabel(parent_frame, text="Geen documenten geanalyseerd in deze bron.", font=("Segoe UI", 16, "italic"), text_color="#e2e8f0").pack(pady=50)
-            return
-
-        kleur_score = COLOR_PASS if avg_score >= 75 else (COLOR_WARN if avg_score >= 50 else COLOR_FAIL)
-        ctk.CTkLabel(parent_frame, text=f"Score: {avg_score:.1f}%", font=("Segoe UI Black", 50), text_color=kleur_score).pack(pady=(5, 5))
-        
-        body = ctk.CTkScrollableFrame(parent_frame, fg_color="transparent")
-        body.pack(fill="both", expand=True, pady=5)
-        
-        for mod, scores in domain_dict.items():
-            if not scores: continue 
-            
-            numeric_scores = []
-            for s in scores:
-                try:
-                    val = str(s).replace('%', '').strip()
-                    numeric_scores.append(float(val))
-                except ValueError:
-                    pass 
-            
-            if not numeric_scores: continue
-            
-            mod_avg = sum(numeric_scores) / len(numeric_scores)
-            
-            container = ctk.CTkFrame(body, fg_color="transparent")
-            container.pack(fill="x", pady=5)
-            
-            row = ctk.CTkFrame(container, fg_color=COLOR_BG_DEEP, corner_radius=8, border_width=1, border_color=COLOR_ACCENT)
-            row.pack(fill="x")
-            
-            ctk.CTkLabel(row, text=mod, font=("Segoe UI", 14, "bold"), width=150, anchor="w").pack(side="left", padx=15, pady=12)
-            
-            bar_color = COLOR_PASS if mod_avg >= 70 else (COLOR_WARN if mod_avg >= 50 else COLOR_FAIL)
-            bar = ctk.CTkProgressBar(row, progress_color=bar_color, fg_color=COLOR_BG_LIGHT, height=12)
-            bar.set(mod_avg / 100)
-            bar.pack(side="left", fill="x", expand=True, padx=15)
-            
-            ctk.CTkLabel(row, text=f"{mod_avg:.1f}%", font=("Segoe UI", 14, "bold"), width=60).pack(side="left", padx=5)
-
-            specific_reasons = self._get_module_reasons(mod)
-            
-            detail_frame = ctk.CTkFrame(container, fg_color=COLOR_BG_LIGHT, corner_radius=5)
-            
-            if mod_avg == 100:
-                detail_text = "✔️ Geen compliance fouten gevonden in deze module voor de gescande bestanden."
-                text_color = COLOR_PASS
-            elif not specific_reasons:
-                detail_text = "⚠️ Bestanden faalden op dit onderdeel, mogelijk omdat de hoofdlocatie al foutief is (Locatie Beleid)."
-                text_color = COLOR_WARN
-            else:
-                detail_text = "Gevonden fouten in gescande bestanden:\n\n• " + "\n• ".join(specific_reasons)
-                text_color = "#e2e8f0" 
-
-            ctk.CTkLabel(detail_frame, text=detail_text, font=("Segoe UI", 13), text_color=text_color, justify="left", anchor="w", wraplength=700).pack(fill="x", padx=20, pady=15)
-
-            def make_toggle_func(df, b):
-                def toggle():
-                    if df.winfo_ismapped():
-                        df.pack_forget()
-                        b.configure(text="▼")
-                    else:
-                        df.pack(fill="x", pady=(2,0))
-                        b.configure(text="▲")
-                return toggle
-
-            btn_toggle = ctk.CTkButton(row, text="▼", width=35, height=35, fg_color="transparent", hover_color=COLOR_BG_LIGHT, text_color=COLOR_ACCENT, font=("Segoe UI Black", 14))
-            btn_toggle.configure(command=make_toggle_func(detail_frame, btn_toggle))
-            btn_toggle.pack(side="right", padx=10)
+        # Open het nieuwe dashboard pop-up venster uit dashboard.py!
+        DashboardWindow(self, project_naam, self.analysis_data, self.export_to_csv)
 
     def export_to_csv(self):
         results = self.analysis_data.get("results", [])
