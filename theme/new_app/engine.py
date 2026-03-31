@@ -1,17 +1,210 @@
+class User:
+    def __init__(self, username, is_admin=False):
+        self.username = username
+        self.is_admin = is_admin
+
+import sqlite3
+import os
+import hashlib
+
+import sys
+
+def get_app_dir():
+    if getattr(sys, 'frozen', False): return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+def get_data_dir():
+    appdata = os.getenv('APPDATA')
+    if appdata:
+        p = os.path.join(appdata, 'DocumentScanner')
+        os.makedirs(p, exist_ok=True)
+        return p
+    return get_app_dir()
+
+DB_PATH = os.path.join(get_data_dir(), "app_data.db")
+
+def _hash_password(password):
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Users table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL
+        )
+    ''')
+    
+    # Scans table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS scans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            scan_datum TEXT NOT NULL,
+            afdeling TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+    
+    # Scan Results table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS scan_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id INTEGER,
+            locatie TEXT,
+            bestandsnaam TEXT,
+            score TEXT,
+            reden TEXT,
+            FOREIGN KEY (scan_id) REFERENCES scans (id)
+        )
+    ''')
+    
+    # Create default admin if no users exist
+    cursor.execute("SELECT COUNT(*) FROM users")
+    if cursor.fetchone()[0] == 0:
+        create_user("admin", "admin", "Admin")
+        
+    conn.commit()
+    conn.close()
+
+def create_user(username, password, role="User"):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", 
+                       (username, _hash_password(password), role))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+def verify_user(username, password):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, role FROM users WHERE username=? AND password_hash=?", 
+                   (username, _hash_password(password)))
+    user = cursor.fetchone()
+    conn.close()
+    if user:
+        return {"id": user[0], "username": user[1], "role": user[2], "is_admin": user[2] == "Admin"}
+    return None
+
+def save_scan(user_id, afdeling, scan_datum, results):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO scans (user_id, scan_datum, afdeling) VALUES (?, ?, ?)", 
+                   (user_id, scan_datum, afdeling))
+    scan_id = cursor.lastrowid
+    
+    for r in results:
+        cursor.execute("INSERT INTO scan_results (scan_id, locatie, bestandsnaam, score, reden) VALUES (?, ?, ?, ?, ?)",
+                       (scan_id, r.get("Pad", ""), r.get("Naam", ""), str(r.get("Score_Totaal", "")), r.get("Reden", "")))
+    
+    conn.commit()
+    conn.close()
+
+import time
+from datetime import datetime, timezone
+import os
+
+class QualityEngine:
+    def __init__(self, active_modules):
+        self.domains = active_modules
+
+    def analyze(self, item, stream):
+        scores = {mod: "N/A" for mod in self.domains}
+        reden = []
+        
+        # 1. Bestandsgrootte Check
+        if "Bestandsgrootte" in self.domains:
+            size_b = item.get("size", 0)
+            if size_b == 0:
+                scores["Bestandsgrootte"] = 0
+                reden.append("Grootte: Leeg bestand (0 bytes).")
+            elif size_b > (2 * 1024 * 1024 * 1024): # 2 GB
+                scores["Bestandsgrootte"] = 0
+                reden.append("Grootte: Bestand is groter dan 2GB.")
+            else:
+                scores["Bestandsgrootte"] = 100
+
+        # 2. Actualiteit Check (Ouder dan 3 jaar = aftrek)
+        if "Actualiteit" in self.domains:
+            age_years = self._calculate_age(item)
+            if age_years > 5:
+                scores["Actualiteit"] = 0
+                reden.append(f"Actualiteit: Zeer oud archiefbestand ({age_years:.1f} jr).")
+            elif age_years > 3:
+                scores["Actualiteit"] = 50
+                reden.append(f"Actualiteit: Bestand ouder dan 3 jaar ({age_years:.1f} jr).")
+            elif age_years >= 0:
+                scores["Actualiteit"] = 100
+            else:
+                scores["Actualiteit"] = 0
+                reden.append("Actualiteit: Onbekende wijzigingsdatum.")
+                
+        # 3. Leesbaarheid & Volledigheid
+        # Basis check: Extensie en of we een stream hebben.
+        if "Leesbaarheid" in self.domains:
+            if stream is None and item.get("size", 0) > 0:
+                scores["Leesbaarheid"] = 0
+                reden.append("Leesbaarheid: Bestand is vergrendeld of onleesbaar.")
+            else:
+                scores["Leesbaarheid"] = 100
+                
+        if "Volledigheid" in self.domains:
+            # We assume fullness if size > 1KB and it has an extension.
+            if item.get("extension", "") == "":
+                scores["Volledigheid"] = 0
+                reden.append("Volledigheid: Geen bestandsextensie.")
+            elif item.get("size", 0) < 1024:
+                scores["Volledigheid"] = 50
+                reden.append("Volledigheid: Zeer weinig inhoud (<1KB).")
+            else:
+                scores["Volledigheid"] = 100
+
+        return {
+            "scores": scores,
+            "reasons": reden
+        }
+        
+    def _calculate_age(self, item):
+        try:
+            now = time.time()
+            if item["mode"] == "local": 
+                return (now - item.get("time_modified", os.path.getmtime(item["path"]))) / (365 * 24 * 3600)
+            elif item["mode"] == "sp":
+                date_str = str(item.get("time_modified", ""))
+                if "T" in date_str and "Z" in date_str:
+                    dt = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                    return (now - dt.timestamp()) / (365 * 24 * 3600)
+            return 0
+        except Exception: 
+            return -1
+
 import os
 import io
 import time
+import re
 from office365.sharepoint.client_context import ClientContext
 from requests_negotiate_sspi import HttpNegotiateAuth
 
 class CentraleEngine:
-    def __init__(self, local_paths, sharepoint_sites, active_engines):
+    def __init__(self, local_paths, sharepoint_sites, active_engines, stop_event=None):
         self.local_paths = local_paths
         self.sharepoint_sites = sharepoint_sites
         self.active_engines = active_engines
+        self.stop_event = stop_event
         
         self.results = []
-        self.file_registry = {} 
+        self.file_registry_name = {} 
+        self.file_registry_content = {}
         self.sp_bibliotheken_tracker = {}
 
         # --- DATA QUALITY & SECURITY BASELINES ---
@@ -35,9 +228,16 @@ class CentraleEngine:
         
         # 1. LOKALE SCAN (Met controle op lege mappen)
         for path in self.local_paths:
+            if self.stop_event and self.stop_event.is_set():
+                q.put(("canceled", "Geannuleerd tijdens lokale opsomming."))
+                return
+
             root_src = os.path.abspath(path)
             if os.path.isdir(root_src):
                 for root, dirs, files in os.walk(root_src):
+                    if self.stop_event and self.stop_event.is_set():
+                        q.put(("canceled", "Geannuleerd tijdens opsomming."))
+                        return
                     # DATA QUALITY CHECK: Is de map volledig leeg?
                     if not dirs and not files:
                         map_naam = os.path.basename(root) or root
@@ -59,11 +259,15 @@ class CentraleEngine:
                                 "extension": os.path.splitext(f)[1].lower()
                             }
                             all_items.append(item)
-                            self._register_file(f, "local")
+                            self._register_file(item)
                         except OSError: pass
                         
         # 2. SHAREPOINT SCAN 
         for sp in self.sharepoint_sites:
+            if self.stop_event and self.stop_event.is_set():
+                q.put(("canceled", "Geannuleerd tijdens SharePoint connectie."))
+                return
+
             site_url = sp["url"]
             self.sp_bibliotheken_tracker[site_url] = {"Open Bibliotheek": 0, "Gesloten Bibliotheek": 0, "Foutieve Bieb": 0}
             
@@ -94,6 +298,10 @@ class CentraleEngine:
         # 3. ORCHESTRATIE & ANALYSE
         total_items = len(all_items)
         for index, item in enumerate(all_items):
+            if self.stop_event and self.stop_event.is_set():
+                q.put(("canceled", "Geannuleerd tijdens bestandsanalyse."))
+                return
+            
             self._analyze_item(item)
             if total_items > 0:
                 q.put(("progress", (index + 1) / total_items))
@@ -107,6 +315,8 @@ class CentraleEngine:
         }))
 
     def _walk_sp_recursive(self, ctx, folder, current_path, site_url, all_items):
+        if self.stop_event and self.stop_event.is_set(): return
+        
         try:
             ctx.load(folder, ["Folders", "Files"])
             ctx.execute_query()
@@ -138,7 +348,7 @@ class CentraleEngine:
                         "extension": os.path.splitext(f.name)[1].lower()
                     }
                     all_items.append(item)
-                    self._register_file(f.name, "sp")
+                    self._register_file(item)
                 except Exception: continue
                     
             for sub_folder in folder.folders:
@@ -150,10 +360,15 @@ class CentraleEngine:
         file_stream = self._get_file_stream(item)
         
         filename = item["name"]
+        base_name = self._get_base_filename(filename)
         extension = item["extension"]
         mode = item["mode"]
-        is_duplicate = len(self.file_registry.get(filename.lower(), set())) > 1
+        size_key = f"{item.get('size', 0)}_{extension}"
         
+        name_dups = [loc for loc in self.file_registry_name.get(base_name, []) if loc != item["path"]]
+        content_dups = [loc for loc in self.file_registry_content.get(size_key, []) if loc != item["path"]] if item.get("size", 0) > 1024 else []
+        
+        is_duplicate = len(name_dups) > 0 or len(content_dups) > 0
         item["is_duplicate"] = is_duplicate
         item["has_forbidden_chars"] = any(c in filename for c in self.FORBIDDEN_CHARS)
         item["is_readable_doc"] = extension in self.ALLOWED_SP_EXTS
@@ -176,10 +391,22 @@ class CentraleEngine:
 
         if is_duplicate:
             all_scores["Data Duplicatie"] = 0
-            all_reasons.append("Duplicatie: Bestand bestaat lokaal én op SP.")
-        elif all_scores["Locatie Beleid"] == 0:
-            all_scores["Data Duplicatie"] = 0
-            all_reasons.append("Duplicatie: Faalt door onjuiste basislocatie.")
+            merged_dups = list(set(name_dups + content_dups))
+            
+            clean_locs = []
+            for loc in merged_dups[:2]:
+                parts = loc.replace('\\', '/').split('/')
+                if len(parts) >= 2: clean_locs.append(f".../{parts[-2]}/{parts[-1]}")
+                else: clean_locs.append(loc)
+                
+            loc_str = ", ".join(clean_locs)
+            if len(merged_dups) > 2:
+                loc_str += f" (en {len(merged_dups)-2} meer)"
+                
+            if len(content_dups) > 0:
+                all_reasons.append(f"Duplicatie: Identieke inhoud (grootte {item.get('size')}B) in {loc_str}")
+            else:
+                all_reasons.append(f"Duplicatie: Zeer vergelijkbare bestandsnaam in {loc_str}")
 
         for domein in self.base_domains:
             if item["mode"] == "sp": self.domain_scores_sp[domein].append(all_scores[domein])
@@ -221,10 +448,30 @@ class CentraleEngine:
             elif item["mode"] == "sp": return io.BytesIO(item["ctx"].web.get_file_by_server_relative_url(item["sp_url"]).read())
         except Exception: return None
 
-    def _register_file(self, filename, mode):
-        name_lower = filename.lower()
-        if name_lower not in self.file_registry: self.file_registry[name_lower] = set()
-        self.file_registry[name_lower].add(mode)
+    def _get_base_filename(self, filename):
+        name, _ = os.path.splitext(filename)
+        name = re.sub(r'^\d{8}[_ \-]*', '', name)
+        name = re.sub(r'[_ \-]+[a-zA-Z]$', '', name)
+        name = re.sub(r'[_ \-]*(v|versie|version)\s*\d+(\.\d+)?$', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'[_ \-]*(kopie|copy|definitief|final)(\s*\(\d+\))?$', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'[^a-zA-Z0-9]', '', name)
+        return name.lower()
+
+    def _register_file(self, item):
+        base_name = self._get_base_filename(item["name"])
+        path = item["path"]
+        
+        if base_name not in self.file_registry_name: self.file_registry_name[base_name] = []
+        if path not in self.file_registry_name[base_name]:
+            self.file_registry_name[base_name].append(path)
+            
+        size = item.get("size", 0)
+        ext = item.get("extension", "")
+        if size > 1024:
+            size_key = f"{size}_{ext}"
+            if size_key not in self.file_registry_content: self.file_registry_content[size_key] = []
+            if path not in self.file_registry_content[size_key]:
+                self.file_registry_content[size_key].append(path)
 
     def _validate_sp_library_name(self, site_url, lib_name):
         if lib_name == "Open Bibliotheek": self.sp_bibliotheken_tracker[site_url]["Open Bibliotheek"] += 1
