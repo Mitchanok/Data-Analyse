@@ -13,7 +13,7 @@ class KwaliteitEngine:
             "Duplicatie",
             "Completeness",
             "Consistency"
-]
+        ]
 
         self.MAX_PATH_LENGTH = 260
         self.MAX_FOLDER_DEPTH = 4
@@ -23,7 +23,9 @@ class KwaliteitEngine:
             re.compile(r"^(\d{4}-\d{2}-\d{2})[_ -].+"),
         ]
 
-        self.BAD_NAME_WORDS = {"nieuw", "new", "kopie", "copy", "temp", "final_final", "concept"}
+        self.BAD_NAME_WORDS = {
+            "nieuw", "new", "kopie", "copy", "temp", "final_final", "concept"
+        }
 
     def analyze(self, item, file_stream=None):
         scores = {}
@@ -58,9 +60,9 @@ class KwaliteitEngine:
         reasons.extend(msgs)
 
         return {
-    "scores": scores,
-    "reasons": reasons
-}
+            "scores": scores,
+            "reasons": reasons
+        }
 
     def _check_path_length(self, item):
         path_value = item.get("path", "")
@@ -137,7 +139,7 @@ class KwaliteitEngine:
             return 0, ["Duplicatie: bestandsnaam komt op meerdere locaties of modi voor."]
 
         return 100, []
-    
+
     def _check_completeness(self, item):
         score = 100
         reasons = []
@@ -147,51 +149,48 @@ class KwaliteitEngine:
         size = item.get("size", 0)
 
         if not filename.strip():
-                score -= 50
-        reasons.append("Completeness: bestandsnaam ontbreekt.")
+            score -= 50
+            reasons.append("Completeness: bestandsnaam ontbreekt.")
 
         if not extension:
-                score -= 25
-        reasons.append("Completeness: bestand heeft geen extensie.")
+            score -= 25
+            reasons.append("Completeness: bestand heeft geen extensie.")
 
         if size <= 0:
             score -= 50
             reasons.append("Completeness: bestand heeft geen inhoud (0 bytes).")
         elif size < 1024:
             score -= 25
-        reasons.append("Completeness: bestand is mogelijk onvolledig of bijna leeg.")
+            reasons.append("Completeness: bestand is mogelijk onvolledig of bijna leeg.")
 
         return max(score, 0), reasons
 
-def _check_consistency(self, item):
-    score = 100
-    reasons = []
+    def _check_consistency(self, item):
+        score = 100
+        reasons = []
 
-    filename = item.get("name", "")
-    extension = item.get("extension", "")
-    mode = item.get("mode", "")
+        filename = item.get("name", "")
+        extension = item.get("extension", "")
+        mode = item.get("mode", "")
 
-    # Consistente datumconventie in bestandsnaam
-    matches = [p.match(filename) for p in self.DATE_PREFIX_PATTERNS if p.match(filename)]
-    if not matches:
-        score -= 40
-        reasons.append("Consistency: bestand volgt geen consistente datumconventie in de naam.")
+        matches = [p.match(filename) for p in self.DATE_PREFIX_PATTERNS if p.match(filename)]
+        if not matches:
+            score -= 40
+            reasons.append("Consistency: bestand volgt geen consistente datumconventie in de naam.")
 
-    # Extensie-consistentie voor SharePoint
-    if mode == "sp" and extension not in {".docx", ".xlsx", ".pptx", ".pdf", ".txt"}:
-        score -= 30
-        reasons.append(f"Consistency: extensie {extension} is ongebruikelijk voor SharePoint-opslag.")
+        if mode == "sp" and extension not in {".docx", ".xlsx", ".pptx", ".pdf", ".txt"}:
+            score -= 30
+            reasons.append(f"Consistency: extensie {extension} is ongebruikelijk voor SharePoint-opslag.")
 
-    # Naamstructuur-consistentie
-    if "  " in filename:
-        score -= 15
-        reasons.append("Consistency: bestandsnaam bevat dubbele spaties.")
+        if "  " in filename:
+            score -= 15
+            reasons.append("Consistency: bestandsnaam bevat dubbele spaties.")
 
-    if filename.count(".") > 1:
-        score -= 15
-        reasons.append("Consistency: bestandsnaam bevat meerdere punten.")
+        if filename.count(".") > 1:
+            score -= 15
+            reasons.append("Consistency: bestandsnaam bevat meerdere punten.")
 
-    return max(score, 0), reasons
+        return max(score, 0), reasons
 
     def _check_actualiteit(self, item):
         modified_dt = None
