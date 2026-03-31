@@ -35,7 +35,7 @@ class TkinterDnD_CTk(ctk.CTk, TkinterDnD.DnDWrapper):
 class ComplianceApp(TkinterDnD_CTk):
     def __init__(self):
         super().__init__()
-        self.title("Compliance Analyzer Pro V2.0 - Enterprise Edition")
+        self.title("Information Quality & Compliance Analyser")
         self.geometry("1100x750") 
         self.minsize(950, 650)
         self.configure(fg_color=COLOR_BG_DEEP) 
@@ -61,7 +61,7 @@ class ComplianceApp(TkinterDnD_CTk):
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(4, weight=1) 
 
-        self.logo_label = ctk.CTkLabel(self.sidebar, text="COMPLIANCE\nANALYZER", font=("Segoe UI Black", 24), text_color=COLOR_ACCENT)
+        self.logo_label = ctk.CTkLabel(self.sidebar, text="QUALITY &\nCOMPLIANCE", font=("Segoe UI Black", 24), text_color=COLOR_ACCENT)
         self.logo_label.grid(row=0, column=0, padx=20, pady=(35, 30))
         
         self.lbl_input = ctk.CTkLabel(self.sidebar, text="1. Selecteer Bronnen", font=("Segoe UI", 14, "bold"), text_color="white")
@@ -87,7 +87,7 @@ class ComplianceApp(TkinterDnD_CTk):
         self.header_titel = ctk.CTkLabel(self.main_frame, text="Scan Configuratie", font=("Segoe UI Black", 32), text_color="white")
         self.header_titel.pack(anchor="w", pady=(0, 5))
         
-        self.header_sub = ctk.CTkLabel(self.main_frame, text="Stel je compliance scan in volgens de actuele normen.", font=("Segoe UI", 15), text_color="#e2e8f0")
+        self.header_sub = ctk.CTkLabel(self.main_frame, text="Stel je analyse in voor kwaliteits- en compliancecontroles.", font=("Segoe UI", 15), text_color="#e2e8f0")
         self.header_sub.pack(anchor="w", pady=(0, 25))
 
         self.project_frame = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG_LIGHT, corner_radius=10)
@@ -378,7 +378,7 @@ class ComplianceApp(TkinterDnD_CTk):
         totaal_avg = sum(totaal_scores) / len(totaal_scores) if totaal_scores else -1
         
         dash = ctk.CTkToplevel(self)
-        dash.title(f"Compliance Rapport - {project_naam}")
+        dash.title(f"Analyse Rapport - {project_naam}")
         dash.geometry("950x850")
         dash.configure(fg_color=COLOR_BG_DEEP) 
         
@@ -506,7 +506,7 @@ class ComplianceApp(TkinterDnD_CTk):
             detail_frame = ctk.CTkFrame(container, fg_color=COLOR_BG_LIGHT, corner_radius=5)
             
             if mod_avg == 100:
-                detail_text = "✔️ Geen compliance fouten gevonden in deze module voor de gescande bestanden."
+                detail_text = "✔️ Geen afwijkingen gevonden in deze module voor de gescande bestanden."
                 text_color = COLOR_PASS
             elif not specific_reasons:
                 detail_text = "⚠️ Bestanden faalden op dit onderdeel, mogelijk omdat de hoofdlocatie al foutief is (Locatie Beleid)."
@@ -540,7 +540,7 @@ class ComplianceApp(TkinterDnD_CTk):
         filepath = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV bestanden", "*.csv"), ("Alle bestanden", "*.*")],
-            title="Sla het Compliance Rapport op"
+            title="Sla het Analyse Rapport op"
         )
 
         if not filepath:
