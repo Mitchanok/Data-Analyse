@@ -163,12 +163,13 @@ class ComplianceApp(TkinterDnD_CTk):
         ).pack(anchor="w", padx=20, pady=(15, 10))
 
         self.quality_modules = {
-            "Naamgeving": ctk.BooleanVar(value=True),
-            "Padlengte": ctk.BooleanVar(value=True),
-            "Mapdiepte": ctk.BooleanVar(value=True),
-            "Duplicatie": ctk.BooleanVar(value=True),
+            "Accuracy": ctk.BooleanVar(value=True),
             "Completeness": ctk.BooleanVar(value=True),
-            "Consistency": ctk.BooleanVar(value=True)
+            "Consistency": ctk.BooleanVar(value=True),
+            "Uniqueness": ctk.BooleanVar(value=True),
+            "Timeliness": ctk.BooleanVar(value=True),
+            "Validity": ctk.BooleanVar(value=True),
+            "Granularity": ctk.BooleanVar(value=True)
         }
 
         for naam, var in self.quality_modules.items():
@@ -302,7 +303,7 @@ class ComplianceApp(TkinterDnD_CTk):
             active_engines.append(comp_engine)
 
         if active_quality_modules:
-            quality_engine = KwaliteitEngine()
+            quality_engine = KwaliteitEngine(active_quality_modules)
             active_engines.append(quality_engine)
 
         self.is_analyzing = True

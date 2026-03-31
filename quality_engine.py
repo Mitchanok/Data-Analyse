@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 
 class KwaliteitEngine:
-    def __init__(self):
+    def __init__(self, active_domains=None):
         self.domains = [
             "Accuracy",
             "Completeness",
@@ -14,7 +14,7 @@ class KwaliteitEngine:
             "Validity",
             "Granularity"
         ]
-
+        self.active_domains = set(active_domains or self.domains)
         self.MAX_PATH_LENGTH = 260
         self.MAX_FOLDER_DEPTH = 4
 
@@ -31,33 +31,40 @@ class KwaliteitEngine:
         scores = {}
         reasons = []
 
-        score, msgs = self._check_validity(item)
-        scores["Validity"] = score
-        reasons.extend(msgs)
+        if "Validity" in self.active_domains:
+            score, msgs = self._check_validity(item)
+            scores["Validity"] = score
+            reasons.extend(msgs)
 
-        score, msgs = self._check_completeness(item)
-        scores["Completeness"] = score
-        reasons.extend(msgs)
+        if "Completeness" in self.active_domains:
+            score, msgs = self._check_completeness(item)
+            scores["Completeness"] = score
+            reasons.extend(msgs)
 
-        score, msgs = self._check_consistency(item)
-        scores["Consistency"] = score
-        reasons.extend(msgs)
+        if "Consistency" in self.active_domains:
+            score, msgs = self._check_consistency(item)
+            scores["Consistency"] = score
+            reasons.extend(msgs)
 
-        score, msgs = self._check_uniqueness(item)
-        scores["Uniqueness"] = score
-        reasons.extend(msgs)
+        if "Uniqueness" in self.active_domains:
+            score, msgs = self._check_uniqueness(item)
+            scores["Uniqueness"] = score
+            reasons.extend(msgs)
 
-        score, msgs = self._check_timeliness(item)
-        scores["Timeliness"] = score
-        reasons.extend(msgs)
+        if "Uniqueness" in self.active_domains:
+            score, msgs = self._check_timeliness(item)
+            scores["Timeliness"] = score
+            reasons.extend(msgs)
 
-        score, msgs = self._check_granularity(item)
-        scores["Granularity"] = score
-        reasons.extend(msgs)
+        if "Granularity" in self.active_domains:
+            score, msgs = self._check_granularity(item)
+            scores["Granularity"] = score
+            reasons.extend(msgs)
 
-        score, msgs = self._check_accuracy(item)
-        scores["Accuracy"] = score
-        reasons.extend(msgs)
+        if "Accuracy" in self.active_domains:
+            score, msgs = self._check_accuracy(item)
+            scores["Accuracy"] = score
+            reasons.extend(msgs)
 
         return {
             "scores": scores,
