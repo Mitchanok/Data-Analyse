@@ -89,9 +89,11 @@ from tkinter import messagebox
 from tkinterdnd2 import TkinterDnD
 
 # Engines
-from centrale_engine import Centrale_Engine
+from centrale_engine import CentraleEngine
 from compliance_engine import ComplianceEngine
-from quality_engine import QualityEngine
+from quality_engine import KwaliteitEngine
+
+
 
 # Frames
 from home import AuthFrame
@@ -183,11 +185,11 @@ class ComplianceApp(TkinterDnD_CTk):
         if active_comp:
             active_engines.append(ComplianceEngine(active_comp))
         if active_qual:
-            active_engines.append(QualityEngine(active_qual))
+            active_engines.append(KwaliteitEngine(active_qual))
             
         self.stop_event = threading.Event()
         # Pass current_user to the engine
-        scanner = Centrale_Engine(local_paths, sharepoint_sites, active_engines, self.stop_event)
+        scanner = KwaliteitEngine(local_paths, sharepoint_sites, active_engines, self.stop_event)
         # Sla op welke modules we gebruiken om later dashboard op te splitsen
         self.last_run_comp_modules = active_comp
         self.last_run_qual_modules = active_qual
