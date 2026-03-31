@@ -1,0 +1,303 @@
+import os
+import io
+import time
+import sqlite3
+import logging
+from typing import List, Dict, Any
+from office365.sharepoint.client_context import ClientContext
+from requests_negotiate_sspi import HttpNegotiateAuth
+
+# Configureer logging om "bare exceptions" te vermijden en traceerbaarheid te borgen
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def init_db(db_path: str = "kwaliteits_rapportage.db") -> None:
+    """
+    Module-level functie om de database te initialiseren. 
+    Ontworpen met strikte datatypes om 'Garbage In, Garbage Out' te voorkomen.
+    """
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            # Gebruik veilige, geparameteriseerde statements via ORM/strikte SQL
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS scan_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL,
+                    naam TEXT NOT NULL,
+                    pad TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    score_totaal TEXT,
+                    reden TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            conn.commit()
+            logging.info(f"Database succesvol geïnitialiseerd op: {db_path}")
+    except sqlite3.Error as e:
+        logging.critical(f"Kritieke fout bij het aanmaken van de database: {e}")
+        raise
+
+
+class User:
+    def __init__(self, username: str, is_admin: bool = False):
+        self.username = username
+        self.is_admin = is_admin
+
+
+class CentraleEngine:
+    def __init__(self, local_paths: List[str], sharepoint_sites: List[Dict[str, str]], active_engines: List[Any]):
+        self.local_paths = local_paths
+        self.sharepoint_sites = sharepoint_sites
+        self.active_engines = active_engines
+        
+        self.results = []
+        self.file_registry = {} 
+        self.sp_bibliotheken_tracker = {}
+
+        # --- DATA QUALITY & SECURITY BASELINES ---
+        self.ALLOWED_SP_EXTS = {'.docx', '.xlsx', '.pptx', '.pdf', '.txt'}
+        self.RISKY_EXTS = {'.exe', '.bat', '.msi', '.ps1', '.vbs', '.cmd', '.sh', '.scr'}
+        self.FORBIDDEN_CHARS = set('/\\:*?"<>| !+@')
+        
+        self.base_domains = ["Security (Risico's)", "Data Duplicatie", "Locatie Beleid"]
+        
+        self.all_domains = list(self.base_domains)
+        for engine in self.active_engines:
+            if hasattr(engine, 'domains'):
+                self.all_domains.extend(engine.domains)
+            
+        self.domain_scores_local = {mod: [] for mod in self.all_domains}
+        self.domain_scores_sp = {mod: [] for mod in self.all_domains}
+
+        self.EXCEPTIONS_FOLDERS = ["werkomgeving", "concepten", "wip"]
+
+    def process(self, q: Any) -> None:
+        all_items = []
+        
+        # 1. LOKALE SCAN (Met controle op lege mappen)
+        for path in self.local_paths:
+            root_src = os.path.abspath(path)
+            if os.path.isdir(root_src):
+                for root, dirs, files in os.walk(root_src):
+                    # DATA QUALITY CHECK: Is de map volledig leeg?
+                    if not dirs and not files:
+                        map_naam = os.path.basename(root) or root
+                        self.results.append({
+                            "Type": "Structuur", "Naam": map_naam, "Pad": root, 
+                            "Mode": "LOCAL", "Score_Totaal": "0%", 
+                            "Reden": "Data Vervuiling: Lege map gedetecteerd. Verwijder deze om overzicht te behouden."
+                        })
+                        continue
+
+                    for f in files:
+                        p = os.path.join(root, f)
+                        try:
+                            is_werkomgeving = any(exc in p.lower() for exc in self.EXCEPTIONS_FOLDERS)
+                            item = {
+                                "mode": "local", "path": p, "name": f, 
+                                "size": os.path.getsize(p), "root_source": root_src,
+                                "in_werkomgeving": is_werkomgeving,
+                                "extension": os.path.splitext(f)[1].lower()
+                            }
+                            all_items.append(item)
+                            self._register_file(f, "local")
+                        except OSError as e: 
+                            logging.warning(f"OS Fout bij toegang tot lokaal bestand {p}: {e}")
+                        
+        # 2. SHAREPOINT SCAN 
+        for sp in self.sharepoint_sites:
+            site_url = sp.get("url")
+            if not site_url:
+                continue
+                
+            self.sp_bibliotheken_tracker[site_url] = {"Open Bibliotheek": 0, "Gesloten Bibliotheek": 0, "Foutieve Bieb": 0}
+            
+            try:
+                ctx = ClientContext(site_url).with_credentials(HttpNegotiateAuth())
+                lists = ctx.web.lists
+                ctx.load(lists)
+                ctx.execute_query()
+                
+                for library in lists:
+                    if library.base_template == 101 and not library.hidden:
+                        self._validate_sp_library_name(site_url, library.title)
+                        try:
+                            self._walk_sp_recursive(ctx, library.root_folder, library.title, site_url, all_items)
+                        except Exception as lib_err:
+                            self.results.append({
+                                "Type": "SP Structuur", "Naam": "Toegangsfout", "Pad": f"{site_url}/{library.title}", 
+                                "Mode": "SP", "Score_Totaal": "0%", "Reden": f"Kan SP-bibliotheek niet scannen: {str(lib_err)}"
+                            })
+            except Exception as e:
+                q.put(("error", f"Kritieke SP Connectiefout op {site_url}: {str(e)}"))
+                return
+
+        if not all_items and not self.results:
+            q.put(("error", "Geen bestanden of structuren gevonden om te scannen."))
+            return
+
+        # 3. ORCHESTRATIE & ANALYSE
+        total_items = len(all_items)
+        for index, item in enumerate(all_items):
+            self._analyze_item(item)
+            if total_items > 0:
+                q.put(("progress", (index + 1) / total_items))
+            
+        self._rapporteer_sp_bibliotheken()
+        
+        q.put(("done", {
+            "results": self.results, 
+            "domain_scores_local": self.domain_scores_local,
+            "domain_scores_sp": self.domain_scores_sp
+        }))
+
+    def _walk_sp_recursive(self, ctx: ClientContext, folder: Any, current_path: str, site_url: str, all_items: list) -> None:
+        try:
+            ctx.load(folder, ["Folders", "Files"])
+            ctx.execute_query()
+            
+            # DATA QUALITY CHECK: Is de SharePoint map volledig leeg?
+            if len(folder.files) == 0 and len(folder.folders) == 0:
+                map_naam = current_path.split('/')[-1] if '/' in current_path else current_path
+                self.results.append({
+                    "Type": "Structuur", "Naam": map_naam, "Pad": f"SP: {current_path}", 
+                    "Mode": "SP", "Score_Totaal": "0%", 
+                    "Reden": "Data Vervuiling: Lege map gedetecteerd op SharePoint. Ruim deze op."
+                })
+                return 
+
+            for f in folder.files:
+                try:
+                    ctx.load(f, ["Name", "ServerRelativeUrl", "Length", "TimeCreated", "TimeLastModified"])
+                    ctx.execute_query()
+                    
+                    file_path = f"SP: {current_path}/{f.name}"
+                    is_werkomgeving = any(exc in file_path.lower() for exc in self.EXCEPTIONS_FOLDERS)
+                    
+                    item = {
+                        "mode": "sp", "path": file_path, "name": f.name, 
+                        "size": int(f.length), "sp_url": f.serverRelativeUrl, 
+                        "time_created": f.timeCreated, "time_modified": f.timeLastModified, 
+                        "ctx": ctx, "root_source": site_url,
+                        "in_werkomgeving": is_werkomgeving,
+                        "extension": os.path.splitext(f.name)[1].lower()
+                    }
+                    all_items.append(item)
+                    self._register_file(f.name, "sp")
+                except Exception as e: 
+                    logging.warning(f"Fout bij inladen SP bestand {f.name}: {e}")
+                    continue
+                    
+            for sub_folder in folder.folders:
+                if sub_folder.name not in ["Forms", "_t", "_w", "Templates"]:
+                    self._walk_sp_recursive(ctx, sub_folder, f"{current_path}/{sub_folder.name}", site_url, all_items)
+        except Exception as e: 
+            logging.error(f"Fout tijdens SharePoint recursie in map {current_path}: {e}")
+
+    def _analyze_item(self, item: Dict[str, Any]) -> None:
+        file_stream = None
+        try:
+            file_stream = self._get_file_stream(item)
+            
+            filename = item["name"]
+            extension = item["extension"]
+            mode = item["mode"]
+            is_duplicate = len(self.file_registry.get(filename.lower(), set())) > 1
+            
+            item["is_duplicate"] = is_duplicate
+            item["has_forbidden_chars"] = any(c in filename for c in self.FORBIDDEN_CHARS)
+            item["is_readable_doc"] = extension in self.ALLOWED_SP_EXTS
+            
+            all_scores = {"Security (Risico's)": 100, "Locatie Beleid": 100, "Data Duplicatie": 100}
+            all_reasons = []
+
+            if extension in self.RISKY_EXTS:
+                all_scores["Security (Risico's)"] = 0
+                all_reasons.append("🚨 KRITIEK: Schadelijk bestand.")
+
+            if mode == "sp" and extension not in self.ALLOWED_SP_EXTS:
+                all_scores["Locatie Beleid"] = 0
+                all_reasons.append(f"Locatie: Extensie {extension} mag niet op SP.")
+            elif mode == "local":
+                is_large_file = item["size"] >= (2 * 1024 * 1024 * 1024)
+                if extension in self.ALLOWED_SP_EXTS and not is_large_file:
+                    all_scores["Locatie Beleid"] = 0
+                    all_reasons.append("Locatie: Bestand kan op SP en hoort niet lokaal.")
+
+            if is_duplicate:
+                all_scores["Data Duplicatie"] = 0
+                all_reasons.append("Duplicatie: Bestand bestaat lokaal én op SP.")
+            elif all_scores["Locatie Beleid"] == 0:
+                all_scores["Data Duplicatie"] = 0
+                all_reasons.append("Duplicatie: Faalt door onjuiste basislocatie.")
+
+            for domein in self.base_domains:
+                if item["mode"] == "sp": self.domain_scores_sp[domein].append(all_scores[domein])
+                else: self.domain_scores_local[domein].append(all_scores[domein])
+
+            for engine in self.active_engines:
+                try:
+                    engine_data = engine.analyze(item, file_stream)
+                    for domein, score in engine_data.get("scores", {}).items():
+                        all_scores[domein] = score
+                        if item["mode"] == "sp": self.domain_scores_sp[domein].append(score)
+                        else: self.domain_scores_local[domein].append(score)
+                    all_reasons.extend(engine_data.get("reasons", []))
+                except Exception as e:
+                    all_reasons.append(f"Engine Fout ({engine.__class__.__name__}): {str(e)}")
+
+            item_result = {
+                "Type": "Bestand", "Naam": item["name"], 
+                "Pad": item["path"], "Mode": item["mode"].upper()
+            }
+            
+            active_vals = [v for k, v in all_scores.items() if isinstance(v, int)]
+            item_result["Score_Totaal"] = f"{int(sum(active_vals) / len(active_vals))}%" if active_vals else "0%"
+            
+            for dom in self.all_domains:
+                val = all_scores.get(dom, "N/A")
+                item_result[dom] = f"{val}%" if isinstance(val, int) else val
+                
+            item_result["Reden"] = " | ".join(all_reasons) if all_reasons else "Volledig Compliant"
+            self.results.append(item_result)
+            
+        finally:
+            # QA: Gegarandeerde vrijgave van resources om memory leaks te voorkomen
+            if file_stream:
+                try: 
+                    file_stream.close()
+                except Exception as e: 
+                    logging.warning(f"Kon filestream niet sluiten voor {item.get('name')}: {e}")
+
+    def _get_file_stream(self, item: Dict[str, Any]) -> Any:
+        try:
+            if item["mode"] == "local": 
+                return open(item["path"], "rb")
+            elif item["mode"] == "sp": 
+                return io.BytesIO(item["ctx"].web.get_file_by_server_relative_url(item["sp_url"]).read())
+        except Exception as e: 
+            logging.error(f"Stream Error voor {item.get('name')}: {e}")
+            return None
+        return None
+
+    def _register_file(self, filename: str, mode: str) -> None:
+        name_lower = filename.lower()
+        if name_lower not in self.file_registry: 
+            self.file_registry[name_lower] = set()
+        self.file_registry[name_lower].add(mode)
+
+    def _validate_sp_library_name(self, site_url: str, lib_name: str) -> None:
+        if lib_name == "Open Bibliotheek": 
+            self.sp_bibliotheken_tracker[site_url]["Open Bibliotheek"] += 1
+        elif lib_name == "Gesloten Bibliotheek": 
+            self.sp_bibliotheken_tracker[site_url]["Gesloten Bibliotheek"] += 1
+        elif "bibliotheek" in lib_name.lower() or "bieb" in lib_name.lower(): 
+            self.sp_bibliotheken_tracker[site_url]["Foutieve Bieb"] += 1
+
+    def _rapporteer_sp_bibliotheken(self) -> None:
+        for site, counts in self.sp_bibliotheken_tracker.items():
+            if counts["Open Bibliotheek"] > 1 or counts["Gesloten Bibliotheek"] > 1 or counts["Foutieve Bieb"] > 0:
+                self.results.append({
+                    "Type": "SP Structuur", "Naam": "Bibliotheek Fout", "Pad": site, "Mode": "SP",
+                    "Score_Totaal": "0%", "Reden": f"FOUT: Verkeerde bibliotheek formatie. Open: {counts['Open Bibliotheek']}, Gesloten: {counts['Gesloten Bibliotheek']}, Invalide: {counts['Foutieve Bieb']}."
+                })

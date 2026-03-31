@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import os
 from PIL import Image
-from engine import User
+from centrale_engine import User
 
 COLOR_PASS = "#10b981"
 COLOR_FAIL = "#ef4444"
@@ -58,7 +58,7 @@ class AuthFrame(ctk.CTkFrame):
         self.password_entry.delete(0, 'end')
 
     def login(self):
-        import engine as database
+        import centrale_engine as database
         from tkinter import messagebox
         username = self.username_entry.get().strip()
         password = self.password_entry.get().strip()
