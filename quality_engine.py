@@ -6,13 +6,13 @@ from datetime import datetime, timezone
 class KwaliteitEngine:
     def __init__(self):
         self.domains = [
-            "Padlengte",
-            "Naamgeving",
-            "Syntactische Kwaliteit",
-            "Mapdiepte",
-            "Duplicatie",
+            "Accuracy",
             "Completeness",
-            "Consistency"
+            "Consistency",
+            "Uniqueness",
+            "Timeliness",
+            "Validity",
+            "Granularity"
         ]
 
         self.MAX_PATH_LENGTH = 260
@@ -31,24 +31,8 @@ class KwaliteitEngine:
         scores = {}
         reasons = []
 
-        score, msgs = self._check_path_length(item)
-        scores["Padlengte"] = score
-        reasons.extend(msgs)
-
-        score, msgs = self._check_naamgeving(item)
-        scores["Naamgeving"] = score
-        reasons.extend(msgs)
-
-        score, msgs = self._check_syntaxis(item)
-        scores["Syntactische Kwaliteit"] = score
-        reasons.extend(msgs)
-
-        score, msgs = self._check_mapdiepte(item)
-        scores["Mapdiepte"] = score
-        reasons.extend(msgs)
-
-        score, msgs = self._check_duplicatie(item)
-        scores["Duplicatie"] = score
+        score, msgs = self._check_validity(item)
+        scores["Validity"] = score
         reasons.extend(msgs)
 
         score, msgs = self._check_completeness(item)
@@ -57,6 +41,22 @@ class KwaliteitEngine:
 
         score, msgs = self._check_consistency(item)
         scores["Consistency"] = score
+        reasons.extend(msgs)
+
+        score, msgs = self._check_uniqueness(item)
+        scores["Uniqueness"] = score
+        reasons.extend(msgs)
+
+        score, msgs = self._check_timeliness(item)
+        scores["Timeliness"] = score
+        reasons.extend(msgs)
+
+        score, msgs = self._check_granularity(item)
+        scores["Granularity"] = score
+        reasons.extend(msgs)
+
+        score, msgs = self._check_accuracy(item)
+        scores["Accuracy"] = score
         reasons.extend(msgs)
 
         return {
@@ -75,6 +75,66 @@ class KwaliteitEngine:
             return 50, [f"Padlengte: pad is lang en nadert de limiet ({path_length} tekens)."]
 
         return 100, []
+
+def _check_accuracy(self, item):
+    score = 100
+    reasons = []
+
+    filename = item.get("name", "")
+    extension = item.get("extension", "")
+    modified_dt = None
+
+    # 1. Basiscontrole: naam zonder extensie is verdacht
+    if filename and not extension:
+        score -= 30
+        reasons.append(
+            "Accuracy: bestandsstructuur is onvolledig, waardoor interpretatie onbetrouwbaar wordt."
+        )
+
+    # 2. Haal wijzigingsdatum op
+    try:
+        if item.get("mode") == "local":
+            ts = os.path.getmtime(item["path"])
+            modified_dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()
+        elif item.get("mode") == "sp" and item.get("time_modified"):
+            modified_dt = item["time_modified"]
+    except Exception:
+        modified_dt = None
+
+    # 3. Vergelijk datum in bestandsnaam met wijzigingsdatum
+    if modified_dt:
+        for pattern in self.DATE_PREFIX_PATTERNS:
+            match = pattern.match(filename)
+            if not match:
+                continue
+
+            raw_date = match.group(1)
+            try:
+                if "-" in raw_date:
+                    name_dt = datetime.strptime(raw_date, "%Y-%m-%d")
+                else:
+                    name_dt = datetime.strptime(raw_date, "%Y%m%d")
+
+                delta_days = abs((modified_dt.date() - name_dt.date()).days)
+
+                if delta_days > 365:
+                    score -= 50
+                    reasons.append(
+                        "Accuracy: datum in bestandsnaam wijkt sterk af van de wijzigingsdatum."
+                    )
+                elif delta_days > 30:
+                    score -= 20
+                    reasons.append(
+                        "Accuracy: datum in bestandsnaam wijkt af van de wijzigingsdatum."
+                    )
+
+            except ValueError:
+                score -= 20
+                reasons.append("Accuracy: datum in bestandsnaam is ongeldig.")
+
+            break
+
+    return max(score, 0), reasons
 
     def _check_naamgeving(self, item):
         score = 100
@@ -134,9 +194,9 @@ class KwaliteitEngine:
 
         return 100, []
 
-    def _check_duplicatie(self, item):
+    def _check_uniqueness(self, item):
         if item.get("is_duplicate", False):
-            return 0, ["Duplicatie: bestandsnaam komt op meerdere locaties of modi voor."]
+            return 0, ["Uniqueness: bestandsnaam komt op meerdere locaties of modi voor."]
 
         return 100, []
 
@@ -192,7 +252,7 @@ class KwaliteitEngine:
 
         return max(score, 0), reasons
 
-    def _check_actualiteit(self, item):
+    def _check_timeliness(self, item):
         modified_dt = None
 
         try:
@@ -205,17 +265,47 @@ class KwaliteitEngine:
             pass
 
         if not modified_dt:
-            return 50, ["Actualiteit: wijzigingsdatum kon niet worden bepaald."]
+            return 50, ["Timeliness: wijzigingsdatum kon niet worden bepaald."]
 
         now = datetime.now(tz=modified_dt.tzinfo)
         age_days = (now - modified_dt).days
 
         if age_days > 5 * 365:
-            return 0, ["Actualiteit: bestand is ouder dan 5 jaar."]
+            return 0, ["Timeliness: bestand is ouder dan 5 jaar."]
         elif age_days > 3 * 365:
-            return 50, ["Actualiteit: bestand is ouder dan 3 jaar."]
+            return 50, ["Timeliness: bestand is ouder dan 3 jaar."]
         else:
             return 100, []
+
+    def _check_granularity(self, item):
+        score = 100
+        reasons = []
+
+        depth = self._calculate_depth(item)
+        filename = item.get("name", "").lower()
+        stem = os.path.splitext(filename)[0]
+
+        if depth > self.MAX_FOLDER_DEPTH:
+            score -= 50
+            reasons.append(f"Granularity: bestand zit te diep in de structuur ({depth} niveaus).")
+
+        generic_names = {"document", "bestand", "file", "new", "nieuw"}
+        if stem in generic_names:
+            score -= 50
+            reasons.append("Granularity: bestandsnaam is te generiek.")
+
+        return max(score, 0), reasons
+
+    def _check_validity(self, item):
+        scores = []
+        reasons = []
+
+        for fn in [self._check_path_length, self._check_naamgeving, self._check_syntaxis]:
+            score, msgs = fn(item)
+            scores.append(score)
+            reasons.extend(msgs)
+
+        return int(sum(scores) / len(scores)), reasons
 
     def _calculate_depth(self, item):
         path_value = item.get("path", "")
