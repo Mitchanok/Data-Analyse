@@ -97,27 +97,90 @@ class ComplianceApp(TkinterDnD_CTk):
         self.entry_project = ctk.CTkEntry(self.project_frame, font=("Segoe UI", 14), placeholder_text="Geef test naam", width=400)
         self.entry_project.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
-        self.lbl_modules = ctk.CTkLabel(self.main_frame, text="2. Actieve Compliance Modules", font=("Segoe UI", 18, "bold"), text_color=COLOR_ACCENT)
+        self.lbl_modules = ctk.CTkLabel(
+            self.main_frame,
+            text="2. Actieve Analyse Modules",
+            font=("Segoe UI", 18, "bold"),
+            text_color=COLOR_ACCENT
+        )
         self.lbl_modules.pack(anchor="w", pady=(0, 10))
 
-        self.check_frame = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG_DEEP, corner_radius=15, border_width=1, border_color=COLOR_ACCENT)
-        self.check_frame.pack(fill="x", pady=(0, 30), ipadx=20, ipady=15)
+        self.modules_container = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.modules_container.pack(fill="x", pady=(0, 30))
 
-        self.modules = {
-            "Naamgeving": ctk.BooleanVar(value=True),
+        self.modules_container.grid_columnconfigure(0, weight=1)
+        self.modules_container.grid_columnconfigure(1, weight=1)
+
+        # Compliance blok
+        self.compliance_frame = ctk.CTkFrame(
+            self.modules_container,
+            fg_color=COLOR_BG_DEEP,
+            corner_radius=15,
+            border_width=1,
+            border_color=COLOR_ACCENT
+        )
+        self.compliance_frame.grid(row=0, column=0, padx=(0, 10), sticky="nsew")
+
+        ctk.CTkLabel(
+            self.compliance_frame,
+            text="Compliance",
+            font=("Segoe UI", 16, "bold"),
+            text_color=COLOR_ACCENT
+        ).pack(anchor="w", padx=20, pady=(15, 10))
+
+        self.compliance_modules = {
             "Metadata": ctk.BooleanVar(value=True),
             "Rubricering": ctk.BooleanVar(value=True),
             "Bewaartermijn": ctk.BooleanVar(value=True)
         }
 
-        idx = 0
-        for naam, var in self.modules.items():
-            cb = ctk.CTkCheckBox(self.check_frame, text=naam, variable=var, font=("Segoe UI", 15), checkbox_width=24, checkbox_height=24)
-            cb.grid(row=idx // 2, column=idx % 2, padx=40, pady=15, sticky="w")
-            idx += 1
-            
-        self.check_frame.grid_columnconfigure(0, weight=1)
-        self.check_frame.grid_columnconfigure(1, weight=1)
+        for naam, var in self.compliance_modules.items():
+            cb = ctk.CTkCheckBox(
+                self.compliance_frame,
+                text=naam,
+                variable=var,
+                font=("Segoe UI", 15),
+                checkbox_width=24,
+                checkbox_height=24
+            )
+            cb.pack(anchor="w", padx=20, pady=8)
+
+        # Kwaliteit blok
+        self.quality_frame = ctk.CTkFrame(
+            self.modules_container,
+            fg_color=COLOR_BG_DEEP,
+            corner_radius=15,
+            border_width=1,
+            border_color=COLOR_ACCENT
+        )
+        self.quality_frame.grid(row=0, column=1, padx=(10, 0), sticky="nsew")
+
+        ctk.CTkLabel(
+            self.quality_frame,
+            text="Kwaliteit",
+            font=("Segoe UI", 16, "bold"),
+            text_color=COLOR_ACCENT
+        ).pack(anchor="w", padx=20, pady=(15, 10))
+
+        self.quality_modules = {
+            "Naamgeving": ctk.BooleanVar(value=True),
+            "Padlengte": ctk.BooleanVar(value=True),
+            "Mapdiepte": ctk.BooleanVar(value=True),
+            "Duplicatie": ctk.BooleanVar(value=True),
+            "Completeness": ctk.BooleanVar(value=True),
+            "Consistency": ctk.BooleanVar(value=True)
+        }
+
+        for naam, var in self.quality_modules.items():
+            cb = ctk.CTkCheckBox(
+                self.quality_frame,
+                text=naam,
+                variable=var,
+                font=("Segoe UI", 15),
+                checkbox_width=24,
+                checkbox_height=24
+            )
+            cb.pack(anchor="w", padx=20, pady=8)
 
         self.btn_analyze = ctk.CTkButton(self.main_frame, text="▶ START ANALYSE", font=("Segoe UI Black", 18), height=60, corner_radius=10, text_color="#18181b")
         self.btn_analyze.configure(command=self.start_analysis)
@@ -225,24 +288,28 @@ class ComplianceApp(TkinterDnD_CTk):
             messagebox.showwarning("Data Fout", "Selecteer minimaal één bron om te scannen.")
             return
         
-        active_modules = [key for key, var in self.modules.items() if var.get()]
-        if not active_modules:
+        active_compliance_modules = [key for key, var in self.compliance_modules.items() if var.get()]
+        active_quality_modules = [key for key, var in self.quality_modules.items() if var.get()]
+
+        if not active_compliance_modules and not active_quality_modules:
             messagebox.showwarning("Configuratie Fout", "Selecteer minimaal één module.")
             return
+
+        active_engines = []
+
+        if active_compliance_modules:
+            comp_engine = ComplianceEngine(active_compliance_modules)
+            active_engines.append(comp_engine)
+
+        if active_quality_modules:
+            quality_engine = KwaliteitEngine()
+            active_engines.append(quality_engine)
 
         self.is_analyzing = True
         self.btn_analyze.configure(state="disabled", text="⏳ ANALYSEREN...")
         self.progress.pack(fill="x", pady=20)
         self.progress.set(0)
         
-        # --- ENTERPRISE ARCHITECTUUR UPDATE ---
-        # 1. Maak de gewenste engines aan
-        comp_engine = ComplianceEngine(active_modules)
-        quality_engine = KwaliteitEngine()
-        active_engines = [comp_engine, quality_engine]
-        
-        # (In de toekomst voeg je hier eenvoudig toe: active_engines.append(QualityEngine()))
-
         # 2. Geef de engines door aan de Centrale Scanner
         scanner = CentraleEngine(list(self.selected_local_paths), self.selected_sharepoint_sites, active_engines)
         
