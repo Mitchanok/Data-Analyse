@@ -137,7 +137,7 @@ class DimensieTooltip:
         tw.wm_geometry(f"+{x}+{y}")
         tw.configure(fg_color="#1e3a5f")
         frame = ctk.CTkFrame(tw, fg_color="#1e3a5f", corner_radius=8,
-                             border_width=1, border_color=COLOR_ACCENT)
+                            border_width=1, border_color=COLOR_ACCENT)
         frame.pack(fill="both", expand=True)
         ctk.CTkLabel(
             frame,
@@ -351,7 +351,7 @@ class ComplianceApp(TkinterDnD_CTk):
             self.quality_subkeuze[naam] = sub_var
 
             def _toggle_dropdown(checkbox_var=var, sub_opt_var=sub_var,
-                                  all_opts=opties):
+                                all_opts=opties):
                 pass  # Dropdown altijd zichtbaar; staat uit als checkbox uit is
 
             dropdown = ctk.CTkOptionMenu(
