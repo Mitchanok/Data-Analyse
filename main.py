@@ -20,6 +20,146 @@ COLOR_ACCENT = "#cf9d1f"
 COLOR_BG_DEEP = "#001538" 
 COLOR_BG_LIGHT = "#1a2b4b" 
 
+# === KWALITEIT DIMENSIE METADATA ===
+QUALITY_DIMENSION_INFO = {
+    "Accuracy": {
+        "tooltip": (
+            "Accuracy – Nauwkeurigheid\n"
+            "Meet of de informatie in een bestand klopt met de werkelijkheid.\n"
+            "Controles: datum in bestandsnaam vs. wijzigingsdatum,\n"
+            "aanwezigheid van een geldige extensie."
+        ),
+        "opties": [
+            "Alle onderdelen",
+            "Datum vs. wijzigingsdatum",
+            "Extensiecontrole",
+        ]
+    },
+    "Completeness": {
+        "tooltip": (
+            "Completeness – Volledigheid\n"
+            "Controleert of een bestand alle vereiste eigenschappen bezit.\n"
+            "Controles: aanwezigheid bestandsnaam, extensie en bestandsinhoud (>0 bytes)."
+        ),
+        "opties": [
+            "Alle onderdelen",
+            "Bestandsnaam aanwezig",
+            "Extensie aanwezig",
+            "Bestandsgrootte (>0 bytes)",
+        ]
+    },
+    "Consistency": {
+        "tooltip": (
+            "Consistency – Consistentie\n"
+            "Beoordeelt of bestanden een uniforme naamgevingsconventie volgen.\n"
+            "Controles: datum-prefix aanwezig, geldige extensie voor opslaan,\n"
+            "dubbele spaties of punten in de naam."
+        ),
+        "opties": [
+            "Alle onderdelen",
+            "Datum-prefix conventie",
+            "Extensieconventie (SharePoint)",
+            "Spaties en tekenscontrole",
+        ]
+    },
+    "Uniqueness": {
+        "tooltip": (
+            "Uniqueness – Uniciteit\n"
+            "Detecteert of een bestand als duplicaat voorkomt op meerdere\n"
+            "locaties of in meerdere bronnen (lokaal en SharePoint)."
+        ),
+        "opties": [
+            "Alle onderdelen",
+            "Duplicaten detectie",
+        ]
+    },
+    "Timeliness": {
+        "tooltip": (
+            "Timeliness – Tijdigheid\n"
+            "Geeft aan of bestanden nog actueel zijn op basis van de\n"
+            "laatste wijzigingsdatum.\n"
+            "Controles: ouder dan 3 jaar = waarschuwing, >5 jaar = kritiek."
+        ),
+        "opties": [
+            "Alle onderdelen",
+            "Leeftijd bestand (<3 jaar)",
+            "Leeftijd bestand (<5 jaar)",
+        ]
+    },
+    "Validity": {
+        "tooltip": (
+            "Validity – Geldigheid\n"
+            "Controleert of de structuur en naamgeving voldoen aan de\n"
+            "geldende beleidsregels.\n"
+            "Samengesteld uit: padlengte, naamgeving en syntaxiscontroles."
+        ),
+        "opties": [
+            "Alle onderdelen",
+            "Padlengte",
+            "Naamgeving (datum-prefix, verboden tekens)",
+            "Syntaxis (extensie, lengte, spaties)",
+        ]
+    },
+    "Granularity": {
+        "tooltip": (
+            "Granularity – Granulariteit\n"
+            "Beoordeelt hoe specifiek en gedetailleerd een bestandsnaam is\n"
+            "en hoe diep het bestand in de mappenstructuur staat.\n"
+            "Controles: mapdiepte en te generieke bestandsnamen."
+        ),
+        "opties": [
+            "Alle onderdelen",
+            "Mapdiepte",
+            "Naamspecificiteit",
+        ]
+    },
+}
+
+
+class DimensieTooltip:
+    """Toont een floating tooltip bij hover over een widget."""
+
+    def __init__(self, widget, tekst):
+        self.widget = widget
+        self.tekst = tekst
+        self.tooltip_window = None
+        widget.bind("<Enter>", self._toon)
+        widget.bind("<Leave>", self._verberg)
+        widget.bind("<Motion>", self._verplaats)
+
+    def _toon(self, event=None):
+        if self.tooltip_window:
+            return
+        x = self.widget.winfo_rootx() + 30
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+        self.tooltip_window = tw = ctk.CTkToplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        tw.configure(fg_color="#1e3a5f")
+        frame = ctk.CTkFrame(tw, fg_color="#1e3a5f", corner_radius=8,
+                             border_width=1, border_color=COLOR_ACCENT)
+        frame.pack(fill="both", expand=True)
+        ctk.CTkLabel(
+            frame,
+            text=self.tekst,
+            font=("Segoe UI", 12),
+            text_color="#e2e8f0",
+            justify="left",
+            wraplength=340,
+            padx=12, pady=10
+        ).pack()
+
+    def _verberg(self, event=None):
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+            self.tooltip_window = None
+
+    def _verplaats(self, event=None):
+        if self.tooltip_window:
+            x = self.widget.winfo_rootx() + 30
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+            self.tooltip_window.wm_geometry(f"+{x}+{y}")
+
 try:
     ctk.set_default_color_theme("theme/gold_blue_theme.json")
 except FileNotFoundError:
@@ -171,17 +311,70 @@ class ComplianceApp(TkinterDnD_CTk):
             "Validity": ctk.BooleanVar(value=True),
             "Granularity": ctk.BooleanVar(value=True)
         }
+        # Slaat de gekozen dropdown-optie op per dimensie
+        self.quality_subkeuze = {}
 
         for naam, var in self.quality_modules.items():
+            info = QUALITY_DIMENSION_INFO.get(naam, {})
+            opties = info.get("opties", ["Alle onderdelen"])
+            tooltip_tekst = info.get("tooltip", naam)
+
+            # Buitenste rij per dimensie
+            rij = ctk.CTkFrame(self.quality_frame, fg_color="transparent")
+            rij.pack(fill="x", padx=12, pady=(6, 0))
+
+            # Checkbox
             cb = ctk.CTkCheckBox(
-                self.quality_frame,
+                rij,
                 text=naam,
                 variable=var,
-                font=("Segoe UI", 15),
-                checkbox_width=24,
-                checkbox_height=24
+                font=("Segoe UI", 14),
+                checkbox_width=22,
+                checkbox_height=22,
+                width=140,
             )
-            cb.pack(anchor="w", padx=20, pady=8)
+            cb.pack(side="left")
+
+            # Info-knop met tooltip
+            info_btn = ctk.CTkLabel(
+                rij,
+                text="ℹ️",
+                font=("Segoe UI", 14),
+                cursor="question_arrow",
+                width=24,
+            )
+            info_btn.pack(side="left", padx=(4, 8))
+            DimensieTooltip(info_btn, tooltip_tekst)
+
+            # Dropdown (OptionMenu)
+            sub_var = ctk.StringVar(value=opties[0])
+            self.quality_subkeuze[naam] = sub_var
+
+            def _toggle_dropdown(checkbox_var=var, sub_opt_var=sub_var,
+                                  all_opts=opties):
+                pass  # Dropdown altijd zichtbaar; staat uit als checkbox uit is
+
+            dropdown = ctk.CTkOptionMenu(
+                rij,
+                variable=sub_var,
+                values=opties,
+                font=("Segoe UI", 12),
+                fg_color=COLOR_BG_LIGHT,
+                button_color=COLOR_ACCENT,
+                button_hover_color="#a07c15",
+                text_color="white",
+                dropdown_fg_color=COLOR_BG_DEEP,
+                dropdown_hover_color=COLOR_BG_LIGHT,
+                dropdown_text_color="white",
+                width=170,
+                dynamic_resizing=False,
+            )
+            dropdown.pack(side="left", padx=(0, 6))
+
+            # Koppel checkbox aan actief/inactief van dropdown
+            def _update_state(event=None, dd=dropdown, cbv=var):
+                dd.configure(state="normal" if cbv.get() else "disabled")
+            var.trace_add("write", lambda *a, fn=_update_state: fn())
 
         self.btn_analyze = ctk.CTkButton(self.main_frame, text="▶ START ANALYSE", font=("Segoe UI Black", 18), height=60, corner_radius=10, text_color="#18181b")
         self.btn_analyze.configure(command=self.start_analysis)
@@ -440,9 +633,12 @@ class ComplianceApp(TkinterDnD_CTk):
             combined_domains[mod].extend(self.analysis_data["domain_scores_local"].get(mod, []))
             combined_domains[mod].extend(self.analysis_data["domain_scores_sp"].get(mod, []))
 
-        self._build_tab_content(self.view_total, totaal_avg, combined_domains)
-        self._build_tab_content(self.view_sp, sp_avg, self.analysis_data.get("domain_scores_sp", {}))
-        self._build_tab_content(self.view_local, local_avg, self.analysis_data.get("domain_scores_local", {}))
+        # Snapshot van de dropdown-keuze op het moment van starten
+        subkeuze_snapshot = {k: v.get() for k, v in self.quality_subkeuze.items()}
+
+        self._build_tab_content(self.view_total, totaal_avg, combined_domains, subkeuze_snapshot)
+        self._build_tab_content(self.view_sp, sp_avg, self.analysis_data.get("domain_scores_sp", {}), subkeuze_snapshot)
+        self._build_tab_content(self.view_local, local_avg, self.analysis_data.get("domain_scores_local", {}), subkeuze_snapshot)
 
         switch_tab(btn_total, self.view_total)
 
@@ -461,7 +657,10 @@ class ComplianceApp(TkinterDnD_CTk):
                         reasons_found.add(part)
         return list(reasons_found)
 
-    def _build_tab_content(self, parent_frame, avg_score, domain_dict):
+    def _build_tab_content(self, parent_frame, avg_score, domain_dict, subkeuze=None):
+        if subkeuze is None:
+            subkeuze = {}
+
         if avg_score == -1:
             ctk.CTkLabel(parent_frame, text="Geen documenten geanalyseerd in deze bron.", font=("Segoe UI", 16, "italic"), text_color="#e2e8f0").pack(pady=50)
             return
@@ -493,7 +692,21 @@ class ComplianceApp(TkinterDnD_CTk):
             row = ctk.CTkFrame(container, fg_color=COLOR_BG_DEEP, corner_radius=8, border_width=1, border_color=COLOR_ACCENT)
             row.pack(fill="x")
             
+            # Dimensienaam
             ctk.CTkLabel(row, text=mod, font=("Segoe UI", 14, "bold"), width=150, anchor="w").pack(side="left", padx=15, pady=12)
+
+            # Badge: gekozen subanalyse
+            gekozen_sub = subkeuze.get(mod, "Alle onderdelen")
+            badge_tekst = f"🔍 {gekozen_sub}"
+            ctk.CTkLabel(
+                row,
+                text=badge_tekst,
+                font=("Segoe UI", 11),
+                text_color="#18181b",
+                fg_color=COLOR_ACCENT,
+                corner_radius=6,
+                padx=8, pady=3,
+            ).pack(side="left", padx=(0, 10))
             
             bar_color = COLOR_PASS if mod_avg >= 70 else (COLOR_WARN if mod_avg >= 50 else COLOR_FAIL)
             bar = ctk.CTkProgressBar(row, progress_color=bar_color, fg_color=COLOR_BG_LIGHT, height=12)
@@ -516,7 +729,20 @@ class ComplianceApp(TkinterDnD_CTk):
                 detail_text = "Gevonden fouten in gescande bestanden:\n\n• " + "\n• ".join(specific_reasons)
                 text_color = "#e2e8f0" 
 
-            ctk.CTkLabel(detail_frame, text=detail_text, font=("Segoe UI", 13), text_color=text_color, justify="left", anchor="w", wraplength=700).pack(fill="x", padx=20, pady=15)
+            # Detail-inhoud: toon ook de geselecteerde subanalyse-context
+            subanalyse_info = ""
+            if gekozen_sub != "Alle onderdelen":
+                subanalyse_info = f"\n\n📌 Gefilterd op subanalyse: '{gekozen_sub}'"
+
+            ctk.CTkLabel(
+                detail_frame,
+                text=detail_text + subanalyse_info,
+                font=("Segoe UI", 13),
+                text_color=text_color,
+                justify="left",
+                anchor="w",
+                wraplength=700
+            ).pack(fill="x", padx=20, pady=15)
 
             def make_toggle_func(df, b):
                 def toggle():
