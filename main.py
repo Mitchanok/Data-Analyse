@@ -8,8 +8,8 @@ from datetime import datetime
 from tkinterdnd2 import TkinterDnD, DND_FILES 
 
 # De nieuwe architectuur imports
-from centrale_engine import CentraleEngine
-from compliance_engine import ComplianceEngine
+from Engine.centrale_engine import CentraleEngine
+from Engine.compliance_engine import ComplianceEngine
 
 # WCAG-Compliant kleuren
 COLOR_PASS = "#388E3C"
@@ -106,7 +106,6 @@ class ComplianceApp(TkinterDnD_CTk):
             "Naamgeving": ctk.BooleanVar(value=True),
             "Metadata": ctk.BooleanVar(value=True),
             "Rubricering": ctk.BooleanVar(value=True),
-            "Bewaartermijn": ctk.BooleanVar(value=True)
         }
 
         idx = 0
