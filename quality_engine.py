@@ -56,6 +56,20 @@ class KwaliteitEngine:
             "nieuw", "new", "kopie", "copy", "temp", "final_final", "concept"
         }
 
+        self.FIELD_PATTERNS = {
+            "project_id": re.compile(r"^\d{2}\.\d{2}$"),
+            "cycle": re.compile(r"^[1-9]\d*$"),
+            "composite_reference": re.compile(r"^\d{2}\.\d{2}\.\d{2}-[A-Z]{3}-\d{3}$"),
+            "date_issued": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+            "access_tier": re.compile(r"^(Public|Internal|Confidential)$", re.IGNORECASE),
+        }
+
+        self.ACCESS_TIER_LIBRARY_RULES = {
+            "confidential": {"finance", "hr"},
+            "internal": {"projects", "finance", "hr", "internal"},
+            "public": {"public", "projects"}
+        }
+
         # NATO §4 Composite Timeliness Model: documentcategorieën
         # Point-in-time: eenmalig afgerond → nooit als 'verouderd' markeren
         self.POINT_IN_TIME_INDICATORS = {
@@ -115,6 +129,9 @@ class KwaliteitEngine:
             score, msgs = self._check_accuracy(item)
             scores["Accuracy"] = score
             reasons.extend(msgs)
+
+        if len(scores) >= 4:
+            scores["Composite"] = self._calculate_composite_score(scores)
 
         return {"scores": scores, "reasons": reasons}
 
@@ -212,6 +229,131 @@ class KwaliteitEngine:
             return 50, [f"Mapdiepte: bestand zit op de maximale toegestane diepte ({depth})."]
         return 100, []
 
+    def _parse_nato_filename(self, filename):
+        parsed = {}
+        stem = os.path.splitext(filename)[0]
+        if not self.NATO_NAMING_PATTERN.match(filename):
+            return parsed
+
+        parts = stem.split("-")
+        if parts:
+            parsed["project_cycle"] = parts[0]
+        if len(parts) >= 2:
+            parsed["document_type"] = parts[1].upper()
+        if len(parts) >= 3:
+            parsed["document_number"] = parts[2]
+        return parsed
+
+    def _parse_date(self, value):
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y"):
+                try:
+                    return datetime.strptime(value, fmt)
+                except ValueError:
+                    continue
+        return None
+
+    def _check_field_validity(self, item):
+        score = 100
+        reasons = []
+
+        project_id = item.get("project_id")
+        if project_id and not self.FIELD_PATTERNS["project_id"].match(str(project_id)):
+            score -= 20
+            reasons.append("Validity: Project ID volgt niet het formaat YY.PP.")
+
+        cycle = item.get("cycle")
+        if cycle and not self.FIELD_PATTERNS["cycle"].match(str(cycle)):
+            score -= 15
+            reasons.append("Validity: Cycle moet een positief geheel getal zijn.")
+
+        document_type = item.get("document_type")
+        if document_type and document_type.upper() not in self.ALLOWED_TYPE_CODES:
+            score -= 20
+            reasons.append("Validity: Document Type is geen geldige NATO-code.")
+
+        access_tier = item.get("access_tier")
+        if access_tier and not self.FIELD_PATTERNS["access_tier"].match(str(access_tier)):
+            score -= 20
+            reasons.append("Validity: Access Tier moet Public, Internal of Confidential zijn.")
+
+        composite_reference = item.get("composite_reference")
+        if composite_reference and not self.FIELD_PATTERNS["composite_reference"].match(str(composite_reference)):
+            score -= 20
+            reasons.append("Validity: Composite Reference volgt niet het verwachte patroon.")
+
+        date_issued = item.get("date_issued")
+        if date_issued:
+            parsed = self._parse_date(date_issued)
+            if not parsed:
+                score -= 20
+                reasons.append("Validity: Date Issued is geen geldige datum.")
+            elif parsed.date() > datetime.now().date():
+                score -= 20
+                reasons.append("Validity: Date Issued ligt in de toekomst.")
+
+        return max(score, 0), reasons
+
+    def _check_library_access_tier_alignment(self, item):
+        score = 100
+        reasons = []
+
+        access_tier = str(item.get("access_tier", "")).lower()
+        path_value = str(item.get("path", "")).lower()
+
+        if access_tier == "confidential":
+            if not any(keyword in path_value for keyword in self.ACCESS_TIER_LIBRARY_RULES["confidential"]):
+                score -= 40
+                reasons.append(
+                    "Validity: Confidential document staat niet in een Finance- of HR-bibliotheek."
+                )
+
+        if access_tier == "public":
+            if any(keyword in path_value for keyword in {"hr", "finance"}):
+                score -= 30
+                reasons.append(
+                    "Validity: Public document staat in een beveiligde bibliotheek."
+                )
+
+        return max(score, 0), reasons
+
+    def _check_filename_metadata_concordance(self, item):
+        score = 100
+        reasons = []
+
+        filename = item.get("name", "")
+        parsed = self._parse_nato_filename(filename)
+
+        if parsed:
+            if item.get("project_id") and parsed.get("project_cycle") and str(item["project_id"]) != parsed["project_cycle"]:
+                score -= 20
+                reasons.append("Validity: Project ID in bestandsnaam wijkt af van metadata.")
+            if item.get("document_type") and parsed.get("document_type") and item["document_type"].upper() != parsed["document_type"]:
+                score -= 20
+                reasons.append("Validity: Document Type in bestandsnaam wijkt af van metadata.")
+
+        return max(score, 0), reasons
+
+    def _calculate_composite_score(self, scores):
+        weights = {
+            "Completeness": 0.25,
+            "Validity": 0.25,
+            "Consistency": 0.15,
+            "Timeliness": 0.15,
+            "Accuracy": 0.10,
+            "Uniqueness": 0.05,
+            "Granularity": 0.05,
+        }
+        total = 0.0
+        weight_sum = 0.0
+        for dim, weight in weights.items():
+            if dim in scores:
+                total += scores[dim] * weight
+                weight_sum += weight
+        return int(total / weight_sum) if weight_sum else 0
+
     def _check_validity(self, item):
         scores = []
         reasons = []
@@ -221,6 +363,9 @@ class KwaliteitEngine:
             self._check_naamgeving,
             self._check_syntaxis,
             self._check_mapdiepte,
+            self._check_field_validity,
+            self._check_library_access_tier_alignment,
+            self._check_filename_metadata_concordance,
         ]:
             score, msgs = fn(item)
             scores.append(score)
@@ -274,6 +419,28 @@ class KwaliteitEngine:
                 )
                 break  # Eén melding per bestand
 
+        # Kritische metadatavelden bestaan en zijn ingevuld
+        critical_fields = ["project_id", "document_type", "access_tier"]
+        missing_critical = [field for field in critical_fields if not item.get(field)]
+        if missing_critical:
+            score -= 15 * len(missing_critical)
+            reasons.append(
+                f"Completeness: ontbrekende kritische metadata: {', '.join(missing_critical)}."
+            )
+
+        if not item.get("date_issued"):
+            score -= 10
+            reasons.append("Completeness: Date Issued ontbreekt; dit is nodig voor tijdigheidsanalyse.")
+
+        for field in ["project_id", "document_type", "access_tier", "client", "status"]:
+            value = str(item.get(field, "")).strip().lower()
+            if value in self.PLACEHOLDERS:
+                score -= 20
+                reasons.append(
+                    f"Completeness: metadataveld '{field}' bevat een placeholder-waarde ('{value}')."
+                )
+                break
+
         return max(score, 0), reasons
 
     # =========================================================================
@@ -303,6 +470,12 @@ class KwaliteitEngine:
         if not is_nato and not has_date_prefix:
             score -= 40
             reasons.append("Consistency: bestand volgt geen consistente naamgevingsconventie.")
+
+        # Cross-field vergelijking met metadatavelden
+        parsed = self._parse_nato_filename(filename)
+        if parsed and item.get("project_id") and parsed.get("project_cycle") and str(item["project_id"]) != parsed["project_cycle"]:
+            score -= 20
+            reasons.append("Consistency: Project ID in bestandsnaam komt niet overeen met metadata.")
 
         # SharePoint: ongebruikelijke extensies (§6 cross-dataset)
         if mode == "sp" and extension not in {".docx", ".xlsx", ".pptx", ".pdf", ".txt"}:
@@ -349,9 +522,16 @@ class KwaliteitEngine:
         stem = os.path.splitext(filename)[0]
 
         # §8.1 / §8.2: Bestand bestaat op meerdere locaties
-        if item.get("is_duplicate", False):
+        if item.get("is_exact_duplicate", False) or item.get("duplicate_type") == "exact":
+            score -= 80
+            reasons.append("Uniqueness: exact duplicaat gedetecteerd via hash of naam.")
+        elif item.get("is_duplicate", False):
             score -= 50
             reasons.append("Uniqueness: bestandsnaam komt op meerdere locaties of modi voor.")
+
+        if item.get("is_near_duplicate", False) or item.get("duplicate_type") == "near":
+            score -= 40
+            reasons.append("Uniqueness: near-duplicaat gedetecteerd via tekst- of naamsovereenkomst.")
 
         # §8.2 Name-pattern detectie voor handmatig versiebeheer
         for pat in self.MANUAL_VERSION_PATTERNS:
@@ -401,6 +581,36 @@ class KwaliteitEngine:
 
         now = datetime.now(tz=modified_dt.tzinfo)
         age_days = (now - modified_dt).days
+
+        if item.get("distinct_user_access_count", 0) >= 5:
+            return 100, [
+                "Timeliness: document wordt nog regelmatig geraadpleegd door meerdere gebruikers."
+            ]
+
+        # Prioriteit voor definitieve status en review metadata
+        status = str(item.get("status", "")).lower()
+        if status in {"final", "archived", "definitief", "afgesloten"}:
+            return 100, ["Timeliness: document is gemarkeerd als definitief/archived."]
+
+        last_reviewed = item.get("last_reviewed")
+        review_interval = item.get("review_interval_days")
+        if last_reviewed and review_interval:
+            reviewed_dt = self._parse_date(last_reviewed)
+            try:
+                interval_days = int(review_interval)
+            except (TypeError, ValueError):
+                interval_days = None
+
+            if reviewed_dt and interval_days:
+                days_since_review = (now - reviewed_dt).days
+                if days_since_review > interval_days * 2:
+                    return 50, [
+                        "Timeliness: document is langer dan twee keer de verwachte review-interval niet herzien."
+                    ]
+                if days_since_review > interval_days:
+                    return 75, [
+                        "Timeliness: document is niet binnen de verwachte reviewperiode herzien."
+                    ]
 
         # Categoriseer document op basis van naam-indicatoren
         is_point_in_time = any(ind in stem for ind in self.POINT_IN_TIME_INDICATORS)
