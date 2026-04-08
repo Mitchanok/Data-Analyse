@@ -583,6 +583,25 @@ class ComplianceApp(TkinterDnD_CTk):
                         reasons_found.add(part)
         return list(reasons_found)
 
+    def _get_low_score_files(self, module_name, drempel=70):
+        """Geeft een lijst van (bestandsnaam, pad, score) voor bestanden met score < drempel op de gegeven module."""
+        lage_bestanden = []
+        for res in self.analysis_data.get("results", []):
+            raw = res.get(module_name, "N/A")
+            if raw == "N/A":
+                continue
+            try:
+                score = float(str(raw).replace("%", "").strip())
+            except ValueError:
+                continue
+            if score < drempel:
+                naam = res.get("Naam", "Onbekend")
+                pad  = res.get("Pad", "")
+                lage_bestanden.append((naam, pad, int(score)))
+        # Sorteer op score van laag naar hoog
+        lage_bestanden.sort(key=lambda x: x[2])
+        return lage_bestanden
+
     def _build_tab_content(self, parent_frame, avg_score, domain_dict):
 
         if avg_score == -1:
@@ -627,28 +646,166 @@ class ComplianceApp(TkinterDnD_CTk):
             ctk.CTkLabel(row, text=f"{mod_avg:.1f}%", font=("Segoe UI", 14, "bold"), width=60).pack(side="left", padx=5)
 
             specific_reasons = self._get_module_reasons(mod)
+            low_score_files = self._get_low_score_files(mod)
             
             detail_frame = ctk.CTkFrame(container, fg_color=COLOR_BG_LIGHT, corner_radius=5)
             
             if mod_avg == 100:
                 detail_text = "✔️ Geen afwijkingen gevonden in deze module voor de gescande bestanden."
                 text_color = COLOR_PASS
-            elif not specific_reasons:
-                detail_text = "⚠️ Bestanden faalden op dit onderdeel, mogelijk omdat de hoofdlocatie al foutief is (Locatie Beleid)."
-                text_color = COLOR_WARN
+                ctk.CTkLabel(
+                    detail_frame,
+                    text=detail_text,
+                    font=("Segoe UI", 13),
+                    text_color=text_color,
+                    justify="left",
+                    anchor="w",
+                    wraplength=750
+                ).pack(fill="x", padx=20, pady=15)
             else:
-                detail_text = "Gevonden fouten in gescande bestanden:\n\n• " + "\n• ".join(specific_reasons)
-                text_color = "#e2e8f0" 
+                # --- Foutomschrijvingen ---
+                if specific_reasons:
+                    oorzaken_tekst = "Gevonden oorzaken:\n• " + "\n• ".join(specific_reasons)
+                elif mod_avg < 100:
+                    oorzaken_tekst = "⚠️ Bestanden faalden op dit onderdeel, mogelijk door een foutieve basislocatie (Locatie Beleid)."
 
-            ctk.CTkLabel(
-                detail_frame,
-                text=detail_text,
-                font=("Segoe UI", 13),
-                text_color=text_color,
-                justify="left",
-                anchor="w",
-                wraplength=700
-            ).pack(fill="x", padx=20, pady=15)
+                ctk.CTkLabel(
+                    detail_frame,
+                    text=oorzaken_tekst,
+                    font=("Segoe UI", 13),
+                    text_color="#e2e8f0",
+                    justify="left",
+                    anchor="w",
+                    wraplength=750
+                ).pack(fill="x", padx=20, pady=(15, 5))
+
+                # --- Bestanden met lage score (gepagineerd) ---
+                if low_score_files:
+                    separator = ctk.CTkFrame(detail_frame, height=1, fg_color=COLOR_ACCENT)
+                    separator.pack(fill="x", padx=20, pady=(5, 10))
+
+                    PAGE_SIZE = 10
+                    totaal = len(low_score_files)
+                    totaal_paginas = max(1, (totaal + PAGE_SIZE - 1) // PAGE_SIZE)
+
+                    header_lbl = ctk.CTkLabel(
+                        detail_frame,
+                        text="",
+                        font=("Segoe UI", 12, "bold"),
+                        text_color=COLOR_ACCENT,
+                        anchor="w"
+                    )
+                    header_lbl.pack(fill="x", padx=20, pady=(0, 4))
+
+                    # Frame dat telkens opnieuw gevuld wordt per pagina
+                    pagina_frame = ctk.CTkFrame(detail_frame, fg_color="transparent")
+                    pagina_frame.pack(fill="x", padx=20)
+
+                    # Navigatiebalk onder de lijst
+                    nav_bar = ctk.CTkFrame(detail_frame, fg_color="transparent")
+                    nav_bar.pack(fill="x", padx=20, pady=(6, 10))
+
+                    pagina_lbl = ctk.CTkLabel(
+                        nav_bar,
+                        text="",
+                        font=("Segoe UI", 12),
+                        text_color="#e2e8f0"
+                    )
+
+                    def render_pagina(pagina_nr, _files=low_score_files, _hdr=header_lbl,
+                                      _pf=pagina_frame, _plbl=pagina_lbl,
+                                      _totaal=totaal, _tp=totaal_paginas):
+                        # Header tekst bijwerken
+                        start = pagina_nr * PAGE_SIZE
+                        eind  = min(start + PAGE_SIZE, _totaal)
+                        _hdr.configure(
+                            text=f"📋 Bestanden met lage score – {start + 1}–{eind} van {_totaal} (pagina {pagina_nr + 1}/{_tp}):"
+                        )
+                        _plbl.configure(text=f"Pagina {pagina_nr + 1} / {_tp}")
+
+                        # Leeg het pagina-frame
+                        for w in _pf.winfo_children():
+                            w.destroy()
+
+                        # Toon de bestandsrijen voor deze pagina
+                        for naam, pad, score in _files[start:eind]:
+                            kleur = COLOR_FAIL if score < 50 else COLOR_WARN
+                            icoon = "🔴" if score < 50 else "🟡"
+                            bestand_rij = ctk.CTkFrame(_pf, fg_color=COLOR_BG_DEEP, corner_radius=5)
+                            bestand_rij.pack(fill="x", pady=2)
+
+                            ctk.CTkLabel(
+                                bestand_rij,
+                                text=f"{icoon} {score}%",
+                                font=("Consolas", 12, "bold"),
+                                text_color=kleur,
+                                width=65,
+                                anchor="w"
+                            ).pack(side="left", padx=(10, 5), pady=6)
+
+                            ctk.CTkLabel(
+                                bestand_rij,
+                                text=naam,
+                                font=("Segoe UI", 12, "bold"),
+                                text_color="white",
+                                anchor="w"
+                            ).pack(side="left", padx=(0, 5), pady=6)
+
+                            ctk.CTkLabel(
+                                bestand_rij,
+                                text=pad,
+                                font=("Segoe UI", 10),
+                                text_color="#94a3b8",
+                                anchor="w",
+                                wraplength=480
+                            ).pack(side="left", padx=(0, 10), pady=6, fill="x", expand=True)
+
+                    # State: huidige pagina per module
+                    pagina_state = [0]
+
+                    def ga_vorige(ps=pagina_state, rp=render_pagina):
+                        if ps[0] > 0:
+                            ps[0] -= 1
+                            rp(ps[0])
+                            _update_nav_knoppen(ps[0])
+
+                    def ga_volgende(ps=pagina_state, rp=render_pagina, tp=totaal_paginas):
+                        if ps[0] < tp - 1:
+                            ps[0] += 1
+                            rp(ps[0])
+                            _update_nav_knoppen(ps[0])
+
+                    btn_vorige = ctk.CTkButton(
+                        nav_bar, text="◀ Vorige", width=90, height=28,
+                        font=("Segoe UI", 12, "bold"),
+                        fg_color=COLOR_BG_DEEP, hover_color=COLOR_BG_LIGHT,
+                        text_color=COLOR_ACCENT, border_width=1, border_color=COLOR_ACCENT,
+                        command=ga_vorige
+                    )
+                    btn_vorige.pack(side="left", padx=(0, 6))
+
+                    pagina_lbl.pack(side="left", padx=10)
+
+                    btn_volgende = ctk.CTkButton(
+                        nav_bar, text="Volgende ▶", width=90, height=28,
+                        font=("Segoe UI", 12, "bold"),
+                        fg_color=COLOR_BG_DEEP, hover_color=COLOR_BG_LIGHT,
+                        text_color=COLOR_ACCENT, border_width=1, border_color=COLOR_ACCENT,
+                        command=ga_volgende
+                    )
+                    btn_volgende.pack(side="left", padx=(0, 6))
+
+                    def _update_nav_knoppen(p, _bv=btn_vorige, _bn=btn_volgende, _tp=totaal_paginas):
+                        _bv.configure(state="normal" if p > 0 else "disabled",
+                                      text_color=COLOR_ACCENT if p > 0 else "#4a5568")
+                        _bn.configure(state="normal" if p < _tp - 1 else "disabled",
+                                      text_color=COLOR_ACCENT if p < _tp - 1 else "#4a5568")
+
+                    # Eerste pagina laden
+                    render_pagina(0)
+                    _update_nav_knoppen(0)
+
+                    ctk.CTkFrame(detail_frame, height=4, fg_color="transparent").pack()
 
             def make_toggle_func(df, b):
                 def toggle():
