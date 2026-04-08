@@ -572,14 +572,26 @@ class ComplianceApp(TkinterDnD_CTk):
 
     def _get_module_reasons(self, module_name):
         reasons_found = set()
-        keyword = module_name.split()[0] 
-        
+        module_keywords = {
+            "Security (Risico's)": ["security", "risico", "schadelijk", "🚨", "kritiek"],
+            "Locatie Beleid": ["locatie", "locatie:", "basislocatie", "sp"],
+            "Data Duplicatie": ["duplicatie", "duplicate", "dupl", "duplicate", "dubbel"],
+            "Accuracy": ["accuracy", "date logic", "structuurcontrole", "content-type", "datum"],
+            "Completeness": ["completeness", "placeholder", "ontbreekt", "onvolledig", "lege map"],
+            "Consistency": ["consistency", "consistentie", "naamgevingsconventie", "overeenkomst"],
+            "Uniqueness": ["uniqueness", "duplicaat", "version", "copy of", "_v"],
+            "Timeliness": ["timeliness", "verouderd", "review", "wijzigingsdatum", "status"],
+            "Granularity": ["granularity", "generiek", "jaaraanduiding", "detail"],
+        }
+        keywords = module_keywords.get(module_name, [module_name.split()[0].lower()])
+
         for res in self.analysis_data.get("results", []):
-            reden_string = res.get("Reden", "")
-            if keyword in reden_string:
-                parts = reden_string.split(" | ")
+            reden_string = str(res.get("Reden", "")).lower()
+            if any(keyword in reden_string for keyword in keywords):
+                parts = [part.strip() for part in res.get("Reden", "").split(" | ") if part.strip()]
                 for part in parts:
-                    if keyword in part:
+                    lower_part = part.lower()
+                    if any(keyword in lower_part for keyword in keywords):
                         reasons_found.add(part)
         return list(reasons_found)
 
@@ -667,7 +679,14 @@ class ComplianceApp(TkinterDnD_CTk):
                 if specific_reasons:
                     oorzaken_tekst = "Gevonden oorzaken:\n• " + "\n• ".join(specific_reasons)
                 elif mod_avg < 100:
-                    oorzaken_tekst = "⚠️ Bestanden faalden op dit onderdeel, mogelijk door een foutieve basislocatie (Locatie Beleid)."
+                    if mod == "Locatie Beleid":
+                        oorzaken_tekst = "⚠️ Locatie Beleid gefaald: controleer of het bestand op de juiste bron staat."
+                    elif mod == "Data Duplicatie":
+                        oorzaken_tekst = "⚠️ Data Duplicatie: mogelijk meerdere kopieën of onjuiste bronlocatie."
+                    elif mod == "Security (Risico's)":
+                        oorzaken_tekst = "⚠️ Security-issue gedetecteerd: controleer risicobestanden en extensies."
+                    else:
+                        oorzaken_tekst = "⚠️ Dit onderdeel vertoont afwijkingen; bekijk de bestandsdetails voor de exacte oorzaak."
 
                 ctk.CTkLabel(
                     detail_frame,
