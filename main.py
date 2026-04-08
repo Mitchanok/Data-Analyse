@@ -675,7 +675,19 @@ class ComplianceApp(TkinterDnD_CTk):
             else:
                 # --- Foutomschrijvingen ---
                 if specific_reasons:
-                    oorzaken_tekst = "Gevonden oorzaken:\n• " + "\n• ".join(specific_reasons)
+                    if mod_avg >= 95:
+                        oorzaken_tekst = (
+                            "✅ Goed bezig! Er zijn nog kleine afwijkingen gevonden, "
+                            "bekijk de bestandsdetails voor de exacte oorzaak.\n\n"
+                            "Gevonden oorzaken:\n• " + "\n• ".join(specific_reasons)
+                        )
+                    else:
+                        oorzaken_tekst = "Gevonden oorzaken:\n• " + "\n• ".join(specific_reasons)
+                elif mod_avg >= 95:
+                    oorzaken_tekst = (
+                        "✅ Goed bezig! De score is hoog, maar er zijn nog kleine afwijkingen. "
+                        "Bekijk de bestandsdetails voor de oorzaak."
+                    )
                 elif mod_avg < 100:
                     if mod == "Locatie Beleid":
                         oorzaken_tekst = "⚠️ Locatie Beleid gefaald: controleer of het bestand op de juiste bron staat."
