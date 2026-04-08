@@ -56,6 +56,12 @@ UI_QUALITY_GROUPS = {
     }
 }
 
+UI_COMPLIANCE_GROUPS = {
+    "Metadata": "Controleert op de aanwezigheid van verplichte of verwachte metadata en eigenschappen binnen documenten.",
+    "Rubricering": "Verifieert of documenten voorzien zijn van de correcte vertrouwelijkheidslabels en veiligheidsrubriceringen.",
+    "Bewaartermijn": "Controleert de retentieperiode en identificeert bestanden waarvan de wettelijke of interne bewaartermijn is verstreken."
+}
+
 
 class DimensieTooltip:
     """Toont een floating tooltip bij hover over een widget."""
@@ -216,15 +222,30 @@ class ComplianceApp(TkinterDnD_CTk):
         }
 
         for naam, var in self.compliance_modules.items():
+            tooltip_tekst = UI_COMPLIANCE_GROUPS.get(naam, naam)
+
+            rij = ctk.CTkFrame(self.compliance_frame, fg_color="transparent")
+            rij.pack(fill="x", padx=12, pady=(10, 8))
+
             cb = ctk.CTkCheckBox(
-                self.compliance_frame,
+                rij,
                 text=naam,
                 variable=var,
                 font=("Segoe UI", 15),
                 checkbox_width=24,
                 checkbox_height=24
             )
-            cb.pack(anchor="w", padx=20, pady=8)
+            cb.pack(side="left")
+
+            info_btn = ctk.CTkLabel(
+                rij,
+                text="ℹ️",
+                font=("Segoe UI", 14),
+                cursor="question_arrow",
+                width=24,
+            )
+            info_btn.pack(side="left", padx=(4, 8))
+            DimensieTooltip(info_btn, tooltip_tekst)
 
         # Kwaliteit blok
         self.quality_frame = ctk.CTkFrame(
