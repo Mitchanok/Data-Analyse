@@ -22,7 +22,7 @@ COLOR_BG_LIGHT = "#1a2b4b"
 
 # === KWALITEIT DIMENSIE METADATA ===
 UI_QUALITY_GROUPS = {
-    "Betrouwbaarheid": {
+    "Betrouwbaarheid\n& Validiteit": {
         "tooltip": (
             "Betrouwbaarheid & Validiteit\n"
             "Controleert de nauwkeurigheid van data (bijv. datums in naam)\n"
@@ -30,7 +30,7 @@ UI_QUALITY_GROUPS = {
         ),
         "dimensions": ["Accuracy", "Consistency", "Validity"]
     },
-    "Volledigheid": {
+    "Volledigheid\n& Structuur": {
         "tooltip": (
             "Volledigheid\n"
             "Detecteert ontbrekende metadata (geen extensie, geen naam)\n"
@@ -38,7 +38,7 @@ UI_QUALITY_GROUPS = {
         ),
         "dimensions": ["Completeness"]
     },
-    "Uniciteit & Detail": {
+    "Uniciteit\n& Detail": {
         "tooltip": (
             "Uniciteit & Granulariteit\n"
             "Spoort dubbele documenten op in en over bronnen heen en\n"
@@ -46,7 +46,7 @@ UI_QUALITY_GROUPS = {
         ),
         "dimensions": ["Uniqueness", "Granularity"]
     },
-    "Tijdigheid": {
+    "Tijdigheid\n& Actualiteit": {
         "tooltip": (
             "Tijdigheid\n"
             "Analyseert de levensduur en wijzigingsdatum van bestanden\n"
@@ -244,19 +244,19 @@ class ComplianceApp(TkinterDnD_CTk):
         ).pack(anchor="w", padx=20, pady=(15, 10))
 
         self.quality_modules = {
-            "Betrouwbaarheid": ctk.BooleanVar(value=True),
-            "Volledigheid": ctk.BooleanVar(value=True),
-            "Uniciteit & Detail": ctk.BooleanVar(value=True),
-            "Tijdigheid": ctk.BooleanVar(value=True)
+            "Betrouwbaarheid\n& Validiteit": ctk.BooleanVar(value=True),
+            "Volledigheid\n& Structuur": ctk.BooleanVar(value=True),
+            "Uniciteit\n& Detail": ctk.BooleanVar(value=True),
+            "Tijdigheid\n& Actualiteit": ctk.BooleanVar(value=True)
         }
 
         for naam, var in self.quality_modules.items():
             info = UI_QUALITY_GROUPS.get(naam, {})
-            tooltip_tekst = info.get("tooltip", naam)
+            tooltip_tekst = info.get("tooltip", naam.replace('\n', ' '))
 
             # Buitenste rij per dimensie
             rij = ctk.CTkFrame(self.quality_frame, fg_color="transparent")
-            rij.pack(fill="x", padx=12, pady=(6, 0))
+            rij.pack(fill="x", padx=12, pady=(10, 8))
 
             # Checkbox
             cb = ctk.CTkCheckBox(
@@ -264,9 +264,8 @@ class ComplianceApp(TkinterDnD_CTk):
                 text=naam,
                 variable=var,
                 font=("Segoe UI", 14),
-                checkbox_width=22,
-                checkbox_height=22,
-                width=170,
+                checkbox_width=24,
+                checkbox_height=24,
             )
             cb.pack(side="left")
 
