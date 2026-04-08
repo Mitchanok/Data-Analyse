@@ -190,8 +190,8 @@ class ComplianceApp(TkinterDnD_CTk):
         )
         self.lbl_modules.pack(anchor="w", pady=(0, 10))
 
-        self.modules_container = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.modules_container.pack(fill="x", pady=(0, 30))
+        self.modules_container = ctk.CTkScrollableFrame(self.main_frame, fg_color="transparent", height=420)
+        self.modules_container.pack(fill="both", pady=(0, 20), expand=False)
 
         self.modules_container.grid_columnconfigure(0, weight=1)
         self.modules_container.grid_columnconfigure(1, weight=1)
