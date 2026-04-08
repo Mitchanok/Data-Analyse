@@ -595,9 +595,9 @@ class ComplianceApp(TkinterDnD_CTk):
                         reasons_found.add(part)
         return list(reasons_found)
 
-    def _get_low_score_files(self, module_name, drempel=70):
-        """Geeft een lijst van (bestandsnaam, pad, score) voor bestanden met score < drempel op de gegeven module."""
-        lage_bestanden = []
+    def _get_sorted_files_for_module(self, module_name, drempel=100):
+        """Geeft een lijst van (bestandsnaam, pad, score) voor alle bestanden in de module, gesorteerd op score."""
+        bestanden = []
         for res in self.analysis_data.get("results", []):
             raw = res.get(module_name, "N/A")
             if raw == "N/A":
@@ -606,13 +606,11 @@ class ComplianceApp(TkinterDnD_CTk):
                 score = float(str(raw).replace("%", "").strip())
             except ValueError:
                 continue
-            if score < drempel:
-                naam = res.get("Naam", "Onbekend")
-                pad  = res.get("Pad", "")
-                lage_bestanden.append((naam, pad, int(score)))
-        # Sorteer op score van laag naar hoog
-        lage_bestanden.sort(key=lambda x: x[2])
-        return lage_bestanden
+            naam = res.get("Naam", "Onbekend")
+            pad  = res.get("Pad", "")
+            bestanden.append((naam, pad, int(score)))
+        bestanden.sort(key=lambda x: x[2])
+        return bestanden
 
     def _build_tab_content(self, parent_frame, avg_score, domain_dict):
 
@@ -658,7 +656,7 @@ class ComplianceApp(TkinterDnD_CTk):
             ctk.CTkLabel(row, text=f"{mod_avg:.1f}%", font=("Segoe UI", 14, "bold"), width=60).pack(side="left", padx=5)
 
             specific_reasons = self._get_module_reasons(mod)
-            low_score_files = self._get_low_score_files(mod)
+            module_files = self._get_sorted_files_for_module(mod)
             
             detail_frame = ctk.CTkFrame(container, fg_color=COLOR_BG_LIGHT, corner_radius=5)
             
@@ -698,13 +696,13 @@ class ComplianceApp(TkinterDnD_CTk):
                     wraplength=750
                 ).pack(fill="x", padx=20, pady=(15, 5))
 
-                # --- Bestanden met lage score (gepagineerd) ---
-                if low_score_files:
+                # --- Bestandenlijst (gepagineerd) ---
+                if module_files:
                     separator = ctk.CTkFrame(detail_frame, height=1, fg_color=COLOR_ACCENT)
                     separator.pack(fill="x", padx=20, pady=(5, 10))
 
                     PAGE_SIZE = 10
-                    totaal = len(low_score_files)
+                    totaal = len(module_files)
                     totaal_paginas = max(1, (totaal + PAGE_SIZE - 1) // PAGE_SIZE)
 
                     header_lbl = ctk.CTkLabel(
@@ -731,14 +729,14 @@ class ComplianceApp(TkinterDnD_CTk):
                         text_color="#e2e8f0"
                     )
 
-                    def render_pagina(pagina_nr, _files=low_score_files, _hdr=header_lbl,
+                    def render_pagina(pagina_nr, _files=module_files, _hdr=header_lbl,
                                       _pf=pagina_frame, _plbl=pagina_lbl,
                                       _totaal=totaal, _tp=totaal_paginas):
                         # Header tekst bijwerken
                         start = pagina_nr * PAGE_SIZE
                         eind  = min(start + PAGE_SIZE, _totaal)
                         _hdr.configure(
-                            text=f"📋 Bestanden met lage score – {start + 1}–{eind} van {_totaal} (pagina {pagina_nr + 1}/{_tp}):"
+                            text=f"📋 Bestanden gesorteerd op score – {start + 1}–{eind} van {_totaal} (pagina {pagina_nr + 1}/{_tp}):"
                         )
                         _plbl.configure(text=f"Pagina {pagina_nr + 1} / {_tp}")
 
@@ -748,8 +746,8 @@ class ComplianceApp(TkinterDnD_CTk):
 
                         # Toon de bestandsrijen voor deze pagina
                         for naam, pad, score in _files[start:eind]:
-                            kleur = COLOR_FAIL if score < 50 else COLOR_WARN
-                            icoon = "🔴" if score < 50 else "🟡"
+                            kleur = COLOR_FAIL if score < 50 else (COLOR_WARN if score < 75 else COLOR_PASS)
+                            icoon = "🔴" if score < 50 else ("🟡" if score < 75 else "🟢")
                             bestand_rij = ctk.CTkFrame(_pf, fg_color=COLOR_BG_DEEP, corner_radius=5)
                             bestand_rij.pack(fill="x", pady=2)
 
