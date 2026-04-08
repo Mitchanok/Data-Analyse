@@ -51,7 +51,7 @@ class KwaliteitEngine:
             scores["Uniqueness"] = score
             reasons.extend(msgs)
 
-        if "Uniqueness" in self.active_domains:
+        if "Timeliness" in self.active_domains:
             score, msgs = self._check_timeliness(item)
             scores["Timeliness"] = score
             reasons.extend(msgs)
@@ -83,65 +83,65 @@ class KwaliteitEngine:
 
         return 100, []
 
-def _check_accuracy(self, item):
-    score = 100
-    reasons = []
+    def _check_accuracy(self, item):
+        score = 100
+        reasons = []
 
-    filename = item.get("name", "")
-    extension = item.get("extension", "")
-    modified_dt = None
-
-    # 1. Basiscontrole: naam zonder extensie is verdacht
-    if filename and not extension:
-        score -= 30
-        reasons.append(
-            "Accuracy: bestandsstructuur is onvolledig, waardoor interpretatie onbetrouwbaar wordt."
-        )
-
-    # 2. Haal wijzigingsdatum op
-    try:
-        if item.get("mode") == "local":
-            ts = os.path.getmtime(item["path"])
-            modified_dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()
-        elif item.get("mode") == "sp" and item.get("time_modified"):
-            modified_dt = item["time_modified"]
-    except Exception:
+        filename = item.get("name", "")
+        extension = item.get("extension", "")
         modified_dt = None
 
-    # 3. Vergelijk datum in bestandsnaam met wijzigingsdatum
-    if modified_dt:
-        for pattern in self.DATE_PREFIX_PATTERNS:
-            match = pattern.match(filename)
-            if not match:
-                continue
+        # 1. Basiscontrole: naam zonder extensie is verdacht
+        if filename and not extension:
+            score -= 30
+            reasons.append(
+                "Accuracy: bestandsstructuur is onvolledig, waardoor interpretatie onbetrouwbaar wordt."
+            )
 
-            raw_date = match.group(1)
-            try:
-                if "-" in raw_date:
-                    name_dt = datetime.strptime(raw_date, "%Y-%m-%d")
-                else:
-                    name_dt = datetime.strptime(raw_date, "%Y%m%d")
+        # 2. Haal wijzigingsdatum op
+        try:
+            if item.get("mode") == "local":
+                ts = os.path.getmtime(item["path"])
+                modified_dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()
+            elif item.get("mode") == "sp" and item.get("time_modified"):
+                modified_dt = item["time_modified"]
+        except Exception:
+            modified_dt = None
 
-                delta_days = abs((modified_dt.date() - name_dt.date()).days)
+        # 3. Vergelijk datum in bestandsnaam met wijzigingsdatum
+        if modified_dt:
+            for pattern in self.DATE_PREFIX_PATTERNS:
+                match = pattern.match(filename)
+                if not match:
+                    continue
 
-                if delta_days > 365:
-                    score -= 50
-                    reasons.append(
-                        "Accuracy: datum in bestandsnaam wijkt sterk af van de wijzigingsdatum."
-                    )
-                elif delta_days > 30:
+                raw_date = match.group(1)
+                try:
+                    if "-" in raw_date:
+                        name_dt = datetime.strptime(raw_date, "%Y-%m-%d")
+                    else:
+                        name_dt = datetime.strptime(raw_date, "%Y%m%d")
+
+                    delta_days = abs((modified_dt.date() - name_dt.date()).days)
+
+                    if delta_days > 365:
+                        score -= 50
+                        reasons.append(
+                            "Accuracy: datum in bestandsnaam wijkt sterk af van de wijzigingsdatum."
+                        )
+                    elif delta_days > 30:
+                        score -= 20
+                        reasons.append(
+                            "Accuracy: datum in bestandsnaam wijkt af van de wijzigingsdatum."
+                        )
+
+                except ValueError:
                     score -= 20
-                    reasons.append(
-                        "Accuracy: datum in bestandsnaam wijkt af van de wijzigingsdatum."
-                    )
+                    reasons.append("Accuracy: datum in bestandsnaam is ongeldig.")
 
-            except ValueError:
-                score -= 20
-                reasons.append("Accuracy: datum in bestandsnaam is ongeldig.")
+                break
 
-            break
-
-    return max(score, 0), reasons
+        return max(score, 0), reasons
 
     def _check_naamgeving(self, item):
         score = 100
@@ -307,7 +307,7 @@ def _check_accuracy(self, item):
         scores = []
         reasons = []
 
-        for fn in [self._check_path_length, self._check_naamgeving, self._check_syntaxis]:
+        for fn in [self._check_path_length, self._check_naamgeving, self._check_syntaxis, self._check_mapdiepte]:
             score, msgs = fn(item)
             scores.append(score)
             reasons.extend(msgs)
