@@ -228,7 +228,7 @@ class ComplianceApp(TkinterDnD_CTk):
         ctk.CTkLabel(
             self.quality_frame,
             text="Kwaliteit",
-            font=("Segoe UI", 16, "bold"),
+            font=("Segoe UI", 14, "bold"),
             text_color=COLOR_ACCENT
         ).pack(anchor="w", padx=20, pady=(15, 10))
 
