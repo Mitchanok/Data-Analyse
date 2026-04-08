@@ -64,19 +64,22 @@ UI_COMPLIANCE_GROUPS = {
 
 
 class DimensieTooltip:
-    """Toont een floating tooltip bij hover over een widget."""
+    """Toont een floating tooltip bij klik op een widget."""
 
     def __init__(self, widget, tekst):
         self.widget = widget
         self.tekst = tekst
         self.tooltip_window = None
-        widget.bind("<Enter>", self._toon)
-        widget.bind("<Leave>", self._verberg)
-        widget.bind("<Motion>", self._verplaats)
+        widget.bind("<Button-1>", self._toggle)
+        widget.configure(cursor="hand2")  # Toon hand cursor bij hover
+
+    def _toggle(self, event=None):
+        if self.tooltip_window:
+            self._verberg()
+        else:
+            self._toon()
 
     def _toon(self, event=None):
-        if self.tooltip_window:
-            return
         x = self.widget.winfo_rootx() + 30
         y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
         self.tooltip_window = tw = ctk.CTkToplevel(self.widget)
@@ -101,12 +104,6 @@ class DimensieTooltip:
             self.tooltip_window.destroy()
             self.tooltip_window = None
 
-    def _verplaats(self, event=None):
-        if self.tooltip_window:
-            x = self.widget.winfo_rootx() + 30
-            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
-            self.tooltip_window.wm_geometry(f"+{x}+{y}")
-
 try:
     ctk.set_default_color_theme("theme/gold_blue_theme.json")
 except FileNotFoundError:
@@ -123,8 +120,8 @@ class ComplianceApp(TkinterDnD_CTk):
     def __init__(self):
         super().__init__()
         self.title("Information Quality & Compliance Analyser")
-        self.geometry("1100x750") 
-        self.minsize(950, 650)
+        self.geometry("1400x900") 
+        self.minsize(1200, 800)
         self.configure(fg_color=COLOR_BG_DEEP) 
         
         self.selected_local_paths = set()
@@ -132,6 +129,7 @@ class ComplianceApp(TkinterDnD_CTk):
         self.q = queue.Queue()
         self.analysis_data = None
         self.is_analyzing = False 
+        self.group_vars = {} 
         
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -192,114 +190,92 @@ class ComplianceApp(TkinterDnD_CTk):
         )
         self.lbl_modules.pack(anchor="w", pady=(0, 10))
 
-        self.modules_container = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.modules_container.pack(fill="x", pady=(0, 30))
+        self.modules_scroll = ctk.CTkScrollableFrame(self.main_frame, fg_color="transparent", height=400)
+        self.modules_scroll.pack(fill="x", pady=(0, 30))
 
-        self.modules_container.grid_columnconfigure(0, weight=1)
-        self.modules_container.grid_columnconfigure(1, weight=1)
+        # Compliance groep
+        self._build_module_group("Compliance", UI_COMPLIANCE_GROUPS, self.modules_scroll)
 
-        # Compliance blok
-        self.compliance_frame = ctk.CTkFrame(
-            self.modules_container,
-            fg_color=COLOR_BG_DEEP,
-            corner_radius=15,
-            border_width=1,
-            border_color=COLOR_ACCENT
-        )
-        self.compliance_frame.grid(row=0, column=0, padx=(0, 10), sticky="nsew")
+        # Kwaliteit groepen
+        for group_name, group_info in UI_QUALITY_GROUPS.items():
+            self._build_module_group(group_name, {dim: group_info["tooltip"] for dim in group_info["dimensions"]}, self.modules_scroll)
 
-        ctk.CTkLabel(
-            self.compliance_frame,
-            text="Compliance",
+    def _build_module_group(self, group_name, modules_dict, parent):
+        # Groepsframe
+        group_frame = ctk.CTkFrame(parent, fg_color=COLOR_BG_DEEP, corner_radius=15, border_width=1, border_color=COLOR_ACCENT)
+        group_frame.pack(fill="x", pady=(0, 15), padx=5)
+
+        # Header met toggle
+        header_frame = ctk.CTkFrame(group_frame, fg_color="transparent")
+        header_frame.pack(fill="x", padx=20, pady=(15, 10))
+
+        toggle_btn = ctk.CTkButton(
+            header_frame,
+            text="▶ " + group_name,
             font=("Segoe UI", 16, "bold"),
-            text_color=COLOR_ACCENT
-        ).pack(anchor="w", padx=20, pady=(15, 10))
+            text_color=COLOR_ACCENT,
+            fg_color="transparent",
+            hover_color=COLOR_BG_LIGHT,
+            anchor="w",
+            command=lambda: self._toggle_group(modules_container, toggle_btn)
+        )
+        toggle_btn.pack(side="left")
 
-        self.compliance_modules = {
-            "Metadata": ctk.BooleanVar(value=True),
-            "Rubricering": ctk.BooleanVar(value=True),
-            "Bewaartermijn": ctk.BooleanVar(value=True)
-        }
+        # Info-knop voor groep
+        if group_name in UI_QUALITY_GROUPS:
+            tooltip_tekst = UI_QUALITY_GROUPS[group_name]["tooltip"]
+        else:
+            tooltip_tekst = f"Groep: {group_name}"
 
-        for naam, var in self.compliance_modules.items():
-            tooltip_tekst = UI_COMPLIANCE_GROUPS.get(naam, naam)
+        info_btn = ctk.CTkLabel(
+            header_frame,
+            text="ℹ️",
+            font=("Segoe UI", 14),
+            cursor="hand2",
+        )
+        info_btn.pack(side="right", padx=(10, 0))
+        DimensieTooltip(info_btn, tooltip_tekst)
 
-            rij = ctk.CTkFrame(self.compliance_frame, fg_color="transparent")
-            rij.pack(fill="x", padx=12, pady=(10, 8))
+        # Container voor modules (initieel verborgen)
+        modules_container = ctk.CTkFrame(group_frame, fg_color="transparent")
+        modules_container.pack(fill="x", padx=20, pady=(0, 15))
+        modules_container.pack_forget()  # Start verborgen
+
+        # Checkboxes voor elke module in de groep
+        for module_name, tooltip in modules_dict.items():
+            var = ctk.BooleanVar(value=True)
+            self.group_vars[module_name] = var
+
+            module_frame = ctk.CTkFrame(modules_container, fg_color="transparent")
+            module_frame.pack(fill="x", pady=5)
 
             cb = ctk.CTkCheckBox(
-                rij,
-                text=naam,
-                variable=var,
-                font=("Segoe UI", 15),
-                checkbox_width=24,
-                checkbox_height=24
-            )
-            cb.pack(side="left")
-
-            info_btn = ctk.CTkLabel(
-                rij,
-                text="ℹ️",
-                font=("Segoe UI", 14),
-                cursor="question_arrow",
-                width=24,
-            )
-            info_btn.pack(side="left", padx=(4, 8))
-            DimensieTooltip(info_btn, tooltip_tekst)
-
-        # Kwaliteit blok
-        self.quality_frame = ctk.CTkFrame(
-            self.modules_container,
-            fg_color=COLOR_BG_DEEP,
-            corner_radius=15,
-            border_width=1,
-            border_color=COLOR_ACCENT
-        )
-        self.quality_frame.grid(row=0, column=1, padx=(10, 0), sticky="nsew")
-
-        ctk.CTkLabel(
-            self.quality_frame,
-            text="Kwaliteit",
-            font=("Segoe UI", 16, "bold"),
-            text_color=COLOR_ACCENT
-        ).pack(anchor="w", padx=20, pady=(15, 10))
-
-        self.quality_modules = {
-            "Betrouwbaarheid\n& Validiteit": ctk.BooleanVar(value=True),
-            "Volledigheid\n& Structuur": ctk.BooleanVar(value=True),
-            "Uniciteit\n& Detail": ctk.BooleanVar(value=True),
-            "Tijdigheid\n& Actualiteit": ctk.BooleanVar(value=True)
-        }
-
-        for naam, var in self.quality_modules.items():
-            info = UI_QUALITY_GROUPS.get(naam, {})
-            tooltip_tekst = info.get("tooltip", naam.replace('\n', ' '))
-
-            # Buitenste rij per dimensie
-            rij = ctk.CTkFrame(self.quality_frame, fg_color="transparent")
-            rij.pack(fill="x", padx=12, pady=(10, 8))
-
-            # Checkbox
-            cb = ctk.CTkCheckBox(
-                rij,
-                text=naam,
+                module_frame,
+                text=module_name,
                 variable=var,
                 font=("Segoe UI", 14),
-                checkbox_width=24,
-                checkbox_height=24,
+                checkbox_width=20,
+                checkbox_height=20
             )
-            cb.pack(side="left")
+            cb.pack(side="left", padx=(20, 10))
 
-            # Info-knop met tooltip
-            info_btn = ctk.CTkLabel(
-                rij,
+            # Individuele info
+            mod_info_btn = ctk.CTkLabel(
+                module_frame,
                 text="ℹ️",
-                font=("Segoe UI", 14),
-                cursor="question_arrow",
-                width=24,
+                font=("Segoe UI", 12),
+                cursor="hand2",
             )
-            info_btn.pack(side="left", padx=(4, 8))
-            DimensieTooltip(info_btn, tooltip_tekst)
+            mod_info_btn.pack(side="left")
+            DimensieTooltip(mod_info_btn, tooltip)
+
+    def _toggle_group(self, container, btn):
+        if container.winfo_ismapped():
+            container.pack_forget()
+            btn.configure(text=btn.cget("text").replace("▼", "▶"))
+        else:
+            container.pack(fill="x", padx=20, pady=(0, 15))
+            btn.configure(text=btn.cget("text").replace("▶", "▼"))
 
         self.btn_analyze = ctk.CTkButton(self.main_frame, text="▶ START ANALYSE", font=("Segoe UI Black", 18), height=60, corner_radius=10, text_color="#18181b")
         self.btn_analyze.configure(command=self.start_analysis)
@@ -407,12 +383,9 @@ class ComplianceApp(TkinterDnD_CTk):
             messagebox.showwarning("Data Fout", "Selecteer minimaal één bron om te scannen.")
             return
         
-        active_compliance_modules = [key for key, var in self.compliance_modules.items() if var.get()]
+        active_compliance_modules = [k for k, v in self.group_vars.items() if k in UI_COMPLIANCE_GROUPS and v.get()]
         
-        active_quality_modules = []
-        for key, var in self.quality_modules.items():
-            if var.get():
-                active_quality_modules.extend(UI_QUALITY_GROUPS[key]["dimensions"])
+        active_quality_modules = [k for k, v in self.group_vars.items() if any(k in group["dimensions"] for group in UI_QUALITY_GROUPS.values()) and v.get()]
 
         if not active_compliance_modules and not active_quality_modules:
             messagebox.showwarning("Configuratie Fout", "Selecteer minimaal één module.")
