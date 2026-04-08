@@ -21,98 +21,39 @@ COLOR_BG_DEEP = "#001538"
 COLOR_BG_LIGHT = "#1a2b4b" 
 
 # === KWALITEIT DIMENSIE METADATA ===
-QUALITY_DIMENSION_INFO = {
-    "Accuracy": {
+UI_QUALITY_GROUPS = {
+    "Betrouwbaarheid": {
         "tooltip": (
-            "Accuracy – Nauwkeurigheid\n"
-            "Meet of de informatie in een bestand klopt met de werkelijkheid.\n"
-            "Controles: datum in bestandsnaam vs. wijzigingsdatum,\n"
-            "aanwezigheid van een geldige extensie."
+            "Betrouwbaarheid & Validiteit\n"
+            "Controleert de nauwkeurigheid van data (bijv. datums in naam)\n"
+            "en of de structuur, padlengte en naamgeving geldig zijn."
         ),
-        "opties": [
-            "Alle onderdelen",
-            "Datum vs. wijzigingsdatum",
-            "Extensiecontrole",
-        ]
+        "dimensions": ["Accuracy", "Consistency", "Validity"]
     },
-    "Completeness": {
+    "Volledigheid": {
         "tooltip": (
-            "Completeness – Volledigheid\n"
-            "Controleert of een bestand alle vereiste eigenschappen bezit.\n"
-            "Controles: aanwezigheid bestandsnaam, extensie en bestandsinhoud (>0 bytes)."
+            "Volledigheid\n"
+            "Detecteert ontbrekende metadata (geen extensie, geen naam)\n"
+            "en controleert of bestanden daadwerkelijk inhoud hebben."
         ),
-        "opties": [
-            "Alle onderdelen",
-            "Bestandsnaam aanwezig",
-            "Extensie aanwezig",
-            "Bestandsgrootte (>0 bytes)",
-        ]
+        "dimensions": ["Completeness"]
     },
-    "Consistency": {
+    "Uniciteit & Detail": {
         "tooltip": (
-            "Consistency – Consistentie\n"
-            "Beoordeelt of bestanden een uniforme naamgevingsconventie volgen.\n"
-            "Controles: datum-prefix aanwezig, geldige extensie voor opslaan,\n"
-            "dubbele spaties of punten in de naam."
+            "Uniciteit & Granulariteit\n"
+            "Spoort dubbele documenten op in en over bronnen heen en\n"
+            "evalueert of de bestandsnaam specifiek genoeg is."
         ),
-        "opties": [
-            "Alle onderdelen",
-            "Datum-prefix conventie",
-            "Extensieconventie (SharePoint)",
-            "Spaties en tekenscontrole",
-        ]
+        "dimensions": ["Uniqueness", "Granularity"]
     },
-    "Uniqueness": {
+    "Tijdigheid": {
         "tooltip": (
-            "Uniqueness – Uniciteit\n"
-            "Detecteert of een bestand als duplicaat voorkomt op meerdere\n"
-            "locaties of in meerdere bronnen (lokaal en SharePoint)."
+            "Tijdigheid\n"
+            "Analyseert de levensduur en wijzigingsdatum van bestanden\n"
+            "om sterk verouderde data (>3 of >5 jaar) in kaart te brengen."
         ),
-        "opties": [
-            "Alle onderdelen",
-            "Duplicaten detectie",
-        ]
-    },
-    "Timeliness": {
-        "tooltip": (
-            "Timeliness – Tijdigheid\n"
-            "Geeft aan of bestanden nog actueel zijn op basis van de\n"
-            "laatste wijzigingsdatum.\n"
-            "Controles: ouder dan 3 jaar = waarschuwing, >5 jaar = kritiek."
-        ),
-        "opties": [
-            "Alle onderdelen",
-            "Leeftijd bestand (<3 jaar)",
-            "Leeftijd bestand (<5 jaar)",
-        ]
-    },
-    "Validity": {
-        "tooltip": (
-            "Validity – Geldigheid\n"
-            "Controleert of de structuur en naamgeving voldoen aan de\n"
-            "geldende beleidsregels.\n"
-            "Samengesteld uit: padlengte, naamgeving en syntaxiscontroles."
-        ),
-        "opties": [
-            "Alle onderdelen",
-            "Padlengte",
-            "Naamgeving (datum-prefix, verboden tekens)",
-            "Syntaxis (extensie, lengte, spaties)",
-        ]
-    },
-    "Granularity": {
-        "tooltip": (
-            "Granularity – Granulariteit\n"
-            "Beoordeelt hoe specifiek en gedetailleerd een bestandsnaam is\n"
-            "en hoe diep het bestand in de mappenstructuur staat.\n"
-            "Controles: mapdiepte en te generieke bestandsnamen."
-        ),
-        "opties": [
-            "Alle onderdelen",
-            "Mapdiepte",
-            "Naamspecificiteit",
-        ]
-    },
+        "dimensions": ["Timeliness"]
+    }
 }
 
 
@@ -303,20 +244,14 @@ class ComplianceApp(TkinterDnD_CTk):
         ).pack(anchor="w", padx=20, pady=(15, 10))
 
         self.quality_modules = {
-            "Accuracy": ctk.BooleanVar(value=True),
-            "Completeness": ctk.BooleanVar(value=True),
-            "Consistency": ctk.BooleanVar(value=True),
-            "Uniqueness": ctk.BooleanVar(value=True),
-            "Timeliness": ctk.BooleanVar(value=True),
-            "Validity": ctk.BooleanVar(value=True),
-            "Granularity": ctk.BooleanVar(value=True)
+            "Betrouwbaarheid": ctk.BooleanVar(value=True),
+            "Volledigheid": ctk.BooleanVar(value=True),
+            "Uniciteit & Detail": ctk.BooleanVar(value=True),
+            "Tijdigheid": ctk.BooleanVar(value=True)
         }
-        # Slaat de gekozen dropdown-optie op per dimensie
-        self.quality_subkeuze = {}
 
         for naam, var in self.quality_modules.items():
-            info = QUALITY_DIMENSION_INFO.get(naam, {})
-            opties = info.get("opties", ["Alle onderdelen"])
+            info = UI_QUALITY_GROUPS.get(naam, {})
             tooltip_tekst = info.get("tooltip", naam)
 
             # Buitenste rij per dimensie
@@ -331,7 +266,7 @@ class ComplianceApp(TkinterDnD_CTk):
                 font=("Segoe UI", 14),
                 checkbox_width=22,
                 checkbox_height=22,
-                width=140,
+                width=170,
             )
             cb.pack(side="left")
 
@@ -345,36 +280,6 @@ class ComplianceApp(TkinterDnD_CTk):
             )
             info_btn.pack(side="left", padx=(4, 8))
             DimensieTooltip(info_btn, tooltip_tekst)
-
-            # Dropdown (OptionMenu)
-            sub_var = ctk.StringVar(value=opties[0])
-            self.quality_subkeuze[naam] = sub_var
-
-            def _toggle_dropdown(checkbox_var=var, sub_opt_var=sub_var,
-                                all_opts=opties):
-                pass  # Dropdown altijd zichtbaar; staat uit als checkbox uit is
-
-            dropdown = ctk.CTkOptionMenu(
-                rij,
-                variable=sub_var,
-                values=opties,
-                font=("Segoe UI", 12),
-                fg_color=COLOR_BG_LIGHT,
-                button_color=COLOR_ACCENT,
-                button_hover_color="#a07c15",
-                text_color="white",
-                dropdown_fg_color=COLOR_BG_DEEP,
-                dropdown_hover_color=COLOR_BG_LIGHT,
-                dropdown_text_color="white",
-                width=170,
-                dynamic_resizing=False,
-            )
-            dropdown.pack(side="left", padx=(0, 6))
-
-            # Koppel checkbox aan actief/inactief van dropdown
-            def _update_state(event=None, dd=dropdown, cbv=var):
-                dd.configure(state="normal" if cbv.get() else "disabled")
-            var.trace_add("write", lambda *a, fn=_update_state: fn())
 
         self.btn_analyze = ctk.CTkButton(self.main_frame, text="▶ START ANALYSE", font=("Segoe UI Black", 18), height=60, corner_radius=10, text_color="#18181b")
         self.btn_analyze.configure(command=self.start_analysis)
@@ -483,7 +388,11 @@ class ComplianceApp(TkinterDnD_CTk):
             return
         
         active_compliance_modules = [key for key, var in self.compliance_modules.items() if var.get()]
-        active_quality_modules = [key for key, var in self.quality_modules.items() if var.get()]
+        
+        active_quality_modules = []
+        for key, var in self.quality_modules.items():
+            if var.get():
+                active_quality_modules.extend(UI_QUALITY_GROUPS[key]["dimensions"])
 
         if not active_compliance_modules and not active_quality_modules:
             messagebox.showwarning("Configuratie Fout", "Selecteer minimaal één module.")
@@ -633,12 +542,9 @@ class ComplianceApp(TkinterDnD_CTk):
             combined_domains[mod].extend(self.analysis_data["domain_scores_local"].get(mod, []))
             combined_domains[mod].extend(self.analysis_data["domain_scores_sp"].get(mod, []))
 
-        # Snapshot van de dropdown-keuze op het moment van starten
-        subkeuze_snapshot = {k: v.get() for k, v in self.quality_subkeuze.items()}
-
-        self._build_tab_content(self.view_total, totaal_avg, combined_domains, subkeuze_snapshot)
-        self._build_tab_content(self.view_sp, sp_avg, self.analysis_data.get("domain_scores_sp", {}), subkeuze_snapshot)
-        self._build_tab_content(self.view_local, local_avg, self.analysis_data.get("domain_scores_local", {}), subkeuze_snapshot)
+        self._build_tab_content(self.view_total, totaal_avg, combined_domains)
+        self._build_tab_content(self.view_sp, sp_avg, self.analysis_data.get("domain_scores_sp", {}))
+        self._build_tab_content(self.view_local, local_avg, self.analysis_data.get("domain_scores_local", {}))
 
         switch_tab(btn_total, self.view_total)
 
@@ -657,9 +563,7 @@ class ComplianceApp(TkinterDnD_CTk):
                         reasons_found.add(part)
         return list(reasons_found)
 
-    def _build_tab_content(self, parent_frame, avg_score, domain_dict, subkeuze=None):
-        if subkeuze is None:
-            subkeuze = {}
+    def _build_tab_content(self, parent_frame, avg_score, domain_dict):
 
         if avg_score == -1:
             ctk.CTkLabel(parent_frame, text="Geen documenten geanalyseerd in deze bron.", font=("Segoe UI", 16, "italic"), text_color="#e2e8f0").pack(pady=50)
@@ -695,19 +599,6 @@ class ComplianceApp(TkinterDnD_CTk):
             # Dimensienaam
             ctk.CTkLabel(row, text=mod, font=("Segoe UI", 14, "bold"), width=150, anchor="w").pack(side="left", padx=15, pady=12)
 
-            # Badge: gekozen subanalyse
-            gekozen_sub = subkeuze.get(mod, "Alle onderdelen")
-            badge_tekst = f"🔍 {gekozen_sub}"
-            ctk.CTkLabel(
-                row,
-                text=badge_tekst,
-                font=("Segoe UI", 11),
-                text_color="#18181b",
-                fg_color=COLOR_ACCENT,
-                corner_radius=6,
-                padx=8, pady=3,
-            ).pack(side="left", padx=(0, 10))
-            
             bar_color = COLOR_PASS if mod_avg >= 70 else (COLOR_WARN if mod_avg >= 50 else COLOR_FAIL)
             bar = ctk.CTkProgressBar(row, progress_color=bar_color, fg_color=COLOR_BG_LIGHT, height=12)
             bar.set(mod_avg / 100)
@@ -729,14 +620,9 @@ class ComplianceApp(TkinterDnD_CTk):
                 detail_text = "Gevonden fouten in gescande bestanden:\n\n• " + "\n• ".join(specific_reasons)
                 text_color = "#e2e8f0" 
 
-            # Detail-inhoud: toon ook de geselecteerde subanalyse-context
-            subanalyse_info = ""
-            if gekozen_sub != "Alle onderdelen":
-                subanalyse_info = f"\n\n📌 Gefilterd op subanalyse: '{gekozen_sub}'"
-
             ctk.CTkLabel(
                 detail_frame,
-                text=detail_text + subanalyse_info,
+                text=detail_text,
                 font=("Segoe UI", 13),
                 text_color=text_color,
                 justify="left",
