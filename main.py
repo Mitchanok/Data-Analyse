@@ -190,56 +190,96 @@ class ComplianceApp(TkinterDnD_CTk):
         )
         self.lbl_modules.pack(anchor="w", pady=(0, 10))
 
-        self.modules_scroll = ctk.CTkScrollableFrame(self.main_frame, fg_color="transparent", height=400)
-        self.modules_scroll.pack(fill="x", pady=(0, 30))
+        self.modules_container = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.modules_container.pack(fill="x", pady=(0, 30))
 
-        # Compliance groep
-        self._build_module_group("Compliance", UI_COMPLIANCE_GROUPS, self.modules_scroll)
+        self.modules_container.grid_columnconfigure(0, weight=1)
+        self.modules_container.grid_columnconfigure(1, weight=1)
 
-        # Kwaliteit groepen
-        for group_name, group_info in UI_QUALITY_GROUPS.items():
-            self._build_module_group(group_name, {dim: group_info["tooltip"] for dim in group_info["dimensions"]}, self.modules_scroll)
+        # Compliance blok
+        self.compliance_frame = ctk.CTkFrame(
+            self.modules_container,
+            fg_color=COLOR_BG_DEEP,
+            corner_radius=15,
+            border_width=1,
+            border_color=COLOR_ACCENT
+        )
+        self.compliance_frame.grid(row=0, column=0, padx=(0, 10), sticky="nsew")
 
-    def _build_module_group(self, group_name, modules_dict, parent):
-        # Groepsframe
-        group_frame = ctk.CTkFrame(parent, fg_color=COLOR_BG_DEEP, corner_radius=15, border_width=1, border_color=COLOR_ACCENT)
-        group_frame.pack(fill="x", pady=(0, 15), padx=5)
-
-        # Header met toggle
-        header_frame = ctk.CTkFrame(group_frame, fg_color="transparent")
-        header_frame.pack(fill="x", padx=20, pady=(15, 10))
-
-        toggle_btn = ctk.CTkButton(
-            header_frame,
-            text="▶ " + group_name,
+        ctk.CTkLabel(
+            self.compliance_frame,
+            text="Compliance",
             font=("Segoe UI", 16, "bold"),
-            text_color=COLOR_ACCENT,
-            fg_color="transparent",
-            hover_color=COLOR_BG_LIGHT,
-            anchor="w",
-            command=lambda: self._toggle_group(modules_container, toggle_btn)
-        )
-        toggle_btn.pack(side="left")
+            text_color=COLOR_ACCENT
+        ).pack(anchor="w", padx=20, pady=(15, 10))
 
-        # Info-knop voor groep
-        if group_name in UI_QUALITY_GROUPS:
-            tooltip_tekst = UI_QUALITY_GROUPS[group_name]["tooltip"]
+        self._build_module_group("Compliance", UI_COMPLIANCE_GROUPS, self.compliance_frame, add_header=False)
+
+        # Quality blok
+        self.quality_frame = ctk.CTkFrame(
+            self.modules_container,
+            fg_color=COLOR_BG_DEEP,
+            corner_radius=15,
+            border_width=1,
+            border_color=COLOR_ACCENT
+        )
+        self.quality_frame.grid(row=0, column=1, padx=(10, 0), sticky="nsew")
+
+        ctk.CTkLabel(
+            self.quality_frame,
+            text="Kwaliteit",
+            font=("Segoe UI", 16, "bold"),
+            text_color=COLOR_ACCENT
+        ).pack(anchor="w", padx=20, pady=(15, 10))
+
+        for group_name, group_info in UI_QUALITY_GROUPS.items():
+            self._build_module_group(group_name, {dim: group_info["tooltip"] for dim in group_info["dimensions"]}, self.quality_frame, add_header=True)
+
+    def _build_module_group(self, group_name, modules_dict, parent, add_header=True):
+        if add_header:
+            # Groepsframe
+            group_frame = ctk.CTkFrame(parent, fg_color="transparent")
+            group_frame.pack(fill="x", pady=(0, 15), padx=5)
+
+            # Header met toggle
+            header_frame = ctk.CTkFrame(group_frame, fg_color="transparent")
+            header_frame.pack(fill="x", padx=20, pady=(15, 10))
+
+            toggle_btn = ctk.CTkButton(
+                header_frame,
+                text="▶ " + group_name,
+                font=("Segoe UI", 16, "bold"),
+                text_color=COLOR_ACCENT,
+                fg_color="transparent",
+                hover_color=COLOR_BG_LIGHT,
+                anchor="w",
+                command=lambda: self._toggle_group(modules_container, toggle_btn)
+            )
+            toggle_btn.pack(side="left")
+
+            # Info-knop voor groep
+            if group_name in UI_QUALITY_GROUPS:
+                tooltip_tekst = UI_QUALITY_GROUPS[group_name]["tooltip"]
+            else:
+                tooltip_tekst = f"Groep: {group_name}"
+
+            info_btn = ctk.CTkLabel(
+                header_frame,
+                text="ℹ️",
+                font=("Segoe UI", 14),
+                cursor="hand2",
+            )
+            info_btn.pack(side="right", padx=(10, 0))
+            DimensieTooltip(info_btn, tooltip_tekst)
+
+            # Container voor modules (initieel verborgen)
+            modules_container = ctk.CTkFrame(group_frame, fg_color="transparent")
+            modules_container.pack(fill="x", padx=20, pady=(0, 15))
+            modules_container.pack_forget()  # Start verborgen
         else:
-            tooltip_tekst = f"Groep: {group_name}"
-
-        info_btn = ctk.CTkLabel(
-            header_frame,
-            text="ℹ️",
-            font=("Segoe UI", 14),
-            cursor="hand2",
-        )
-        info_btn.pack(side="right", padx=(10, 0))
-        DimensieTooltip(info_btn, tooltip_tekst)
-
-        # Container voor modules (initieel verborgen)
-        modules_container = ctk.CTkFrame(group_frame, fg_color="transparent")
-        modules_container.pack(fill="x", padx=20, pady=(0, 15))
-        modules_container.pack_forget()  # Start verborgen
+            # Voor hoofdgroepen, direct zichtbaar zonder toggle
+            modules_container = ctk.CTkFrame(parent, fg_color="transparent")
+            modules_container.pack(fill="x", padx=20, pady=(0, 15))
 
         # Checkboxes voor elke module in de groep
         for module_name, tooltip in modules_dict.items():
