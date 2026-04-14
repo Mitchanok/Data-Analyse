@@ -105,7 +105,6 @@ class DimensieTooltip:
         y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
         self.tooltip_window = tw = ctk.CTkToplevel(self.widget)
         tw.wm_overrideredirect(True)
-        tw.wm_geometry(f"+{x}+{y}")
         tw.configure(fg_color="#1e3a5f")
         frame = ctk.CTkFrame(tw, fg_color="#1e3a5f", corner_radius=8,
                             border_width=1, border_color=COLOR_ACCENT)
@@ -119,6 +118,26 @@ class DimensieTooltip:
             wraplength=340,
             padx=12, pady=10
         ).pack()
+
+        # Houd tooltip altijd binnen het scherm (rechts/onder en links/boven afkappen voorkomen)
+        tw.update_idletasks()
+        tip_w = tw.winfo_reqwidth()
+        tip_h = tw.winfo_reqheight()
+        screen_w = self.widget.winfo_screenwidth()
+        screen_h = self.widget.winfo_screenheight()
+        margin = 10
+
+        if x + tip_w > screen_w - margin:
+            x = screen_w - tip_w - margin
+        if x < margin:
+            x = margin
+
+        if y + tip_h > screen_h - margin:
+            y = self.widget.winfo_rooty() - tip_h - 5
+        if y < margin:
+            y = margin
+
+        tw.wm_geometry(f"+{x}+{y}")
 
     def _verberg(self, event=None):
         if self.tooltip_window:
