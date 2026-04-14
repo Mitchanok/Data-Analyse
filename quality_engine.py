@@ -4,6 +4,15 @@ from datetime import datetime, timezone
 
 
 class KwaliteitEngine:
+    """Kwaliteitsdimensies zonder overlap met Centrale- en Compliance-engine.
+
+    Deze engine beoordeelt alleen datakwaliteit en geen basisbeleid zoals:
+    - Locatie/extensiebeleid (CentraleEngine)
+    - Security-risico's (CentraleEngine)
+    - Duplicatie over bronnen (CentraleEngine)
+    - Rubricering/retentie/metadata-compliance (ComplianceEngine)
+    """
+
     def __init__(self, active_domains=None):
         self.domains = [
             "Accuracy",
@@ -12,84 +21,81 @@ class KwaliteitEngine:
             "Uniqueness",
             "Timeliness",
             "Validity",
-            "Granularity"
+            "Granularity",
         ]
         self.active_domains = set(active_domains or self.domains)
+
         self.MAX_PATH_LENGTH = 260
         self.MAX_FOLDER_DEPTH = 4
 
-        # Bestaande datum-prefix patronen
         self.DATE_PREFIX_PATTERNS = [
             re.compile(r"^(\d{8})[_ -].+"),
             re.compile(r"^(\d{4}-\d{2}-\d{2})[_ -].+"),
         ]
 
-        # NATO §5.2.1 naamgevingsconventie: YY.PP.CC-TYP-NNN_Short-Description.ext
-        self.NATO_NAMING_PATTERN = re.compile(
-            r"^\d{2}\.\d{2}\.[\w]{2,4}-[A-Z]{3}-\d{3}"
-        )
-
-        # Erkende documenttype codes (NATO)
-        self.ALLOWED_TYPE_CODES = {
-            "INV", "CON", "RPT", "MIN", "LET", "POL", "TEM", "PRS", "NOT", "ANN"
-        }
-
-        # NATO §8: Patronen voor handmatig versiebeheer (triggeren Uniqueness-aftrek)
         self.MANUAL_VERSION_PATTERNS = [
             re.compile(r"copy\s+of", re.IGNORECASE),
             re.compile(r"kopie\s+van", re.IGNORECASE),
-            re.compile(r"\(\d+\)"),              # (1), (2)
-            re.compile(r"_v\d+", re.IGNORECASE), # _v2, _v3
+            re.compile(r"\(\d+\)"),
+            re.compile(r"_v\d+", re.IGNORECASE),
             re.compile(r"_final_final", re.IGNORECASE),
             re.compile(r"_definitief_definitief", re.IGNORECASE),
-            re.compile(r"\s-\s*\d$"),            # " - 1", " - 2"
+            re.compile(r"\s-\s*\d$"),
         ]
 
-        # NATO §3: Placeholder waarden die niet tellen als gevuld
         self.PLACEHOLDERS = {
-            "tbd", "n/a", "na", "xxx", "nvt", "todo", "temp",
-            "test", "-", "...", "placeholder", "invullen"
+            "tbd",
+            "n/a",
+            "na",
+            "xxx",
+            "nvt",
+            "todo",
+            "temp",
+            "test",
+            "-",
+            "...",
+            "placeholder",
+            "invullen",
         }
 
-        # Vage termen in bestandsnamen
-        self.BAD_NAME_WORDS = {
-            "nieuw", "new", "kopie", "copy", "temp", "final_final", "concept"
-        }
+        self.BAD_NAME_WORDS = {"nieuw", "new", "kopie", "copy", "temp", "final_final", "concept"}
 
-        self.FIELD_PATTERNS = {
-            "project_id": re.compile(r"^\d{2}\.\d{2}$"),
-            "cycle": re.compile(r"^[1-9]\d*$"),
-            "composite_reference": re.compile(r"^\d{2}\.\d{2}\.\d{2}-[A-Z]{3}-\d{3}$"),
-            "date_issued": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
-            "access_tier": re.compile(r"^(Public|Internal|Confidential)$", re.IGNORECASE),
-        }
-
-        self.ACCESS_TIER_LIBRARY_RULES = {
-            "confidential": {"finance", "hr"},
-            "internal": {"projects", "finance", "hr", "internal"},
-            "public": {"public", "projects"}
-        }
-
-        # NATO §4 Composite Timeliness Model: documentcategorieën
-        # Point-in-time: eenmalig afgerond → nooit als 'verouderd' markeren
         self.POINT_IN_TIME_INDICATORS = {
-            "con", "min", "definitief", "signed", "final",
-            "getekend", "afgesloten", "gesloten"
+            "contract",
+            "con",
+            "min",
+            "definitief",
+            "signed",
+            "final",
+            "getekend",
+            "afgesloten",
+            "gesloten",
         }
-        # Living: actief bijgehouden → flag als >180 dagen niet gewijzigd
         self.LIVING_DOC_INDICATORS = {
-            "rpt", "status", "update", "plan", "tracker",
-            "dashboard", "overzicht", "voortgang"
+            "rpt",
+            "status",
+            "update",
+            "plan",
+            "tracker",
+            "dashboard",
+            "overzicht",
+            "voortgang",
         }
-        # Reference: richtlijnen/templates → flag als >365 dagen niet herzien
         self.REFERENCE_DOC_INDICATORS = {
-            "tem", "pol", "template", "policy", "procedure",
-            "richtlijn", "handleiding", "instructie", "manual"
+            "tem",
+            "pol",
+            "template",
+            "policy",
+            "procedure",
+            "richtlijn",
+            "handleiding",
+            "instructie",
+            "manual",
         }
 
-    # =========================================================================
-    # HOOFDANALYSE
-    # =========================================================================
+    # ------------------------------------------------------------------
+    # Hoofdanalyse
+    # ------------------------------------------------------------------
 
     def analyze(self, item, file_stream=None):
         scores = {}
@@ -130,261 +136,55 @@ class KwaliteitEngine:
             scores["Accuracy"] = score
             reasons.extend(msgs)
 
-        if len(scores) >= 4:
-            scores["Composite"] = self._calculate_composite_score(scores)
-
         return {"scores": scores, "reasons": reasons}
 
-    # =========================================================================
-    # VALIDITY  (NATO §5)
-    # =========================================================================
-
-    def _check_path_length(self, item):
-        path_value = item.get("path", "")
-        path_length = len(path_value)
-
-        if path_length > self.MAX_PATH_LENGTH:
-            return 0, [f"Padlengte: pad overschrijdt MAX_PATH ({path_length}>{self.MAX_PATH_LENGTH})."]
-        if path_length > 220:
-            return 50, [f"Padlengte: pad is lang en nadert de limiet ({path_length} tekens)."]
-        return 100, []
-
-    def _check_naamgeving(self, item):
-        """
-        NATO §5.2.1 Naamgevingsconventie: YY.PP.CC-TYP-NNN_Short-Description.ext
-        Als dit niet van toepassing is, wordt ingeval op datum-prefix gelet.
-        """
-        score = 100
-        reasons = []
-
-        filename = item.get("name", "")
-        stem = os.path.splitext(filename)[0].lower()
-
-        is_nato = bool(self.NATO_NAMING_PATTERN.match(filename))
-
-        if is_nato:
-            # Valideer de documenttype code
-            parts = stem.split("-")
-            if len(parts) >= 2:
-                type_code = parts[1].upper()
-                if type_code not in self.ALLOWED_TYPE_CODES:
-                    score -= 20
-                    reasons.append(
-                        f"Naamgeving: documenttype code '{type_code}' is niet herkend "
-                        f"(verwacht: {'/'.join(sorted(self.ALLOWED_TYPE_CODES))})."
-                    )
-        else:
-            # Terugval: controleer op datum-prefix
-            has_date_prefix = any(p.match(filename) for p in self.DATE_PREFIX_PATTERNS)
-            if not has_date_prefix:
-                score -= 40
-                reasons.append(
-                    "Naamgeving: bestand voldoet niet aan de naamgevingsconventie "
-                    "(YY.PP.CC-TYP-NNN of datum-prefix ontbreekt)."
-                )
-
-        if item.get("has_forbidden_chars", False):
-            score -= 30
-            reasons.append("Naamgeving: bestandsnaam bevat verboden tekens.")
-
-        if any(word in stem for word in self.BAD_NAME_WORDS):
-            score -= 30
-            reasons.append("Naamgeving: bestandsnaam bevat tijdelijke of vage termen.")
-
-        return max(score, 0), reasons
-
-    def _check_syntaxis(self, item):
-        score = 100
-        reasons = []
-
-        filename = item.get("name", "")
-        extension = item.get("extension", "")
-        is_nato = bool(self.NATO_NAMING_PATTERN.match(filename))
-
-        if not extension:
-            score -= 50
-            reasons.append("Syntaxis: bestand heeft geen extensie.")
-
-        # NATO-formaat bevat punten by design — geen dubbele-punt aftrek daarvoor
-        if not is_nato and filename.count(".") > 1:
-            score -= 20
-            reasons.append("Syntaxis: bestandsnaam bevat meerdere punten.")
-
-        if len(filename) < 8:
-            score -= 30
-            reasons.append("Syntaxis: bestandsnaam is erg kort en mogelijk niet beschrijvend.")
-
-        if "  " in filename:
-            score -= 20
-            reasons.append("Syntaxis: bestandsnaam bevat dubbele spaties.")
-
-        return max(score, 0), reasons
-
-    def _check_mapdiepte(self, item):
-        depth = self._calculate_depth(item)
-
-        if depth > self.MAX_FOLDER_DEPTH:
-            return 0, [f"Mapdiepte: bestand zit te diep in de structuur ({depth} niveaus)."]
-        if depth == self.MAX_FOLDER_DEPTH:
-            return 50, [f"Mapdiepte: bestand zit op de maximale toegestane diepte ({depth})."]
-        return 100, []
-
-    def _parse_nato_filename(self, filename):
-        parsed = {}
-        stem = os.path.splitext(filename)[0]
-        if not self.NATO_NAMING_PATTERN.match(filename):
-            return parsed
-
-        parts = stem.split("-")
-        if parts:
-            parsed["project_cycle"] = parts[0]
-        if len(parts) >= 2:
-            parsed["document_type"] = parts[1].upper()
-        if len(parts) >= 3:
-            parsed["document_number"] = parts[2]
-        return parsed
-
-    def _parse_date(self, value):
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, str):
-            for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y"):
-                try:
-                    return datetime.strptime(value, fmt)
-                except ValueError:
-                    continue
-        return None
-
-    def _check_field_validity(self, item):
-        score = 100
-        reasons = []
-
-        project_id = item.get("project_id")
-        if project_id and not self.FIELD_PATTERNS["project_id"].match(str(project_id)):
-            score -= 20
-            reasons.append("Validity: Project ID volgt niet het formaat YY.PP.")
-
-        cycle = item.get("cycle")
-        if cycle and not self.FIELD_PATTERNS["cycle"].match(str(cycle)):
-            score -= 15
-            reasons.append("Validity: Cycle moet een positief geheel getal zijn.")
-
-        document_type = item.get("document_type")
-        if document_type and document_type.upper() not in self.ALLOWED_TYPE_CODES:
-            score -= 20
-            reasons.append("Validity: Document Type is geen geldige NATO-code.")
-
-        access_tier = item.get("access_tier")
-        if access_tier and not self.FIELD_PATTERNS["access_tier"].match(str(access_tier)):
-            score -= 20
-            reasons.append("Validity: Access Tier moet Public, Internal of Confidential zijn.")
-
-        composite_reference = item.get("composite_reference")
-        if composite_reference and not self.FIELD_PATTERNS["composite_reference"].match(str(composite_reference)):
-            score -= 20
-            reasons.append("Validity: Composite Reference volgt niet het verwachte patroon.")
-
-        date_issued = item.get("date_issued")
-        if date_issued:
-            parsed = self._parse_date(date_issued)
-            if not parsed:
-                score -= 20
-                reasons.append("Validity: Date Issued is geen geldige datum.")
-            elif parsed.date() > datetime.now().date():
-                score -= 20
-                reasons.append("Validity: Date Issued ligt in de toekomst.")
-
-        return max(score, 0), reasons
-
-    def _check_library_access_tier_alignment(self, item):
-        score = 100
-        reasons = []
-
-        access_tier = str(item.get("access_tier", "")).lower()
-        path_value = str(item.get("path", "")).lower()
-
-        if access_tier == "confidential":
-            if not any(keyword in path_value for keyword in self.ACCESS_TIER_LIBRARY_RULES["confidential"]):
-                score -= 40
-                reasons.append(
-                    "Validity: Confidential document staat niet in een Finance- of HR-bibliotheek."
-                )
-
-        if access_tier == "public":
-            if any(keyword in path_value for keyword in {"hr", "finance"}):
-                score -= 30
-                reasons.append(
-                    "Validity: Public document staat in een beveiligde bibliotheek."
-                )
-
-        return max(score, 0), reasons
-
-    def _check_filename_metadata_concordance(self, item):
-        score = 100
-        reasons = []
-
-        filename = item.get("name", "")
-        parsed = self._parse_nato_filename(filename)
-
-        if parsed:
-            if item.get("project_id") and parsed.get("project_cycle") and str(item["project_id"]) != parsed["project_cycle"]:
-                score -= 20
-                reasons.append("Validity: Project ID in bestandsnaam wijkt af van metadata.")
-            if item.get("document_type") and parsed.get("document_type") and item["document_type"].upper() != parsed["document_type"]:
-                score -= 20
-                reasons.append("Validity: Document Type in bestandsnaam wijkt af van metadata.")
-
-        return max(score, 0), reasons
-
-    def _calculate_composite_score(self, scores):
-        weights = {
-            "Completeness": 0.25,
-            "Validity": 0.25,
-            "Consistency": 0.15,
-            "Timeliness": 0.15,
-            "Accuracy": 0.10,
-            "Uniqueness": 0.05,
-            "Granularity": 0.05,
-        }
-        total = 0.0
-        weight_sum = 0.0
-        for dim, weight in weights.items():
-            if dim in scores:
-                total += scores[dim] * weight
-                weight_sum += weight
-        return int(total / weight_sum) if weight_sum else 0
+    # ------------------------------------------------------------------
+    # Validity
+    # ------------------------------------------------------------------
 
     def _check_validity(self, item):
         scores = []
         reasons = []
 
-        for fn in [
-            self._check_path_length,
-            self._check_naamgeving,
-            self._check_syntaxis,
-            self._check_mapdiepte,
-            self._check_field_validity,
-            self._check_library_access_tier_alignment,
-            self._check_filename_metadata_concordance,
-        ]:
-            score, msgs = fn(item)
-            scores.append(score)
-            reasons.extend(msgs)
+        path_value = item.get("path", "")
+        path_length = len(path_value)
+        if path_length > self.MAX_PATH_LENGTH:
+            scores.append(0)
+            reasons.append(f"Validity: pad overschrijdt MAX_PATH ({path_length}>{self.MAX_PATH_LENGTH}).")
+        elif path_length > 220:
+            scores.append(50)
+            reasons.append(f"Validity: pad is lang en nadert limiet ({path_length} tekens).")
+        else:
+            scores.append(100)
+
+        filename = item.get("name", "")
+        extension = item.get("extension", "")
+        if not filename.strip():
+            scores.append(0)
+            reasons.append("Validity: bestandsnaam ontbreekt.")
+        elif not extension:
+            scores.append(25)
+            reasons.append("Validity: bestand heeft geen extensie.")
+        else:
+            scores.append(100)
+
+        depth = self._calculate_depth(item)
+        if depth > self.MAX_FOLDER_DEPTH:
+            scores.append(0)
+            reasons.append(f"Validity: bestand zit te diep in de structuur ({depth} niveaus).")
+        elif depth == self.MAX_FOLDER_DEPTH:
+            scores.append(50)
+            reasons.append(f"Validity: bestand zit op maximale mapdiepte ({depth}).")
+        else:
+            scores.append(100)
 
         return int(sum(scores) / len(scores)), reasons
 
-    # =========================================================================
-    # COMPLETENESS  (NATO §3)
-    # =========================================================================
+    # ------------------------------------------------------------------
+    # Completeness
+    # ------------------------------------------------------------------
 
     def _check_completeness(self, item):
-        """
-        NATO §3:
-        - Bestandsnaam aanwezig en niet leeg/whitespace-only
-        - Extensie aanwezig
-        - Bestand heeft inhoud (>0 bytes, bij voorkeur >1 KB)
-        - Geen placeholder-waarden (TBD, N/A, xxx, ...) in naam (§3.1.2)
-        """
         score = 100
         reasons = []
 
@@ -394,267 +194,128 @@ class KwaliteitEngine:
         stem = os.path.splitext(filename)[0].strip()
 
         if not filename.strip():
-            score -= 50
+            score -= 60
             reasons.append("Completeness: bestandsnaam ontbreekt.")
 
         if not extension:
-            score -= 25
+            score -= 20
             reasons.append("Completeness: bestand heeft geen extensie.")
 
         if size <= 0:
-            score -= 50
+            score -= 60
             reasons.append("Completeness: bestand heeft geen inhoud (0 bytes).")
         elif size < 1024:
-            score -= 25
-            reasons.append("Completeness: bestand is mogelijk onvolledig of bijna leeg (<1 KB).")
+            score -= 20
+            reasons.append("Completeness: bestand is mogelijk onvolledig (<1 KB).")
 
-        # §3.1.2 Placeholder detectie
         stem_words = re.split(r"[\s_\-\.]+", stem.lower())
-        for word in stem_words:
-            if word in self.PLACEHOLDERS:
-                score -= 25
-                reasons.append(
-                    f"Completeness: bestandsnaam bevat een placeholder-waarde ('{word}'). "
-                    "Dit telt als onvolledig per NATO §3.1.2."
-                )
-                break  # Eén melding per bestand
-
-        # Kritische metadatavelden bestaan en zijn ingevuld
-        critical_fields = ["project_id", "document_type", "access_tier"]
-        missing_critical = [field for field in critical_fields if not item.get(field)]
-        if missing_critical:
-            score -= 15 * len(missing_critical)
-            reasons.append(
-                f"Completeness: ontbrekende kritische metadata: {', '.join(missing_critical)}."
-            )
-
-        if not item.get("date_issued"):
-            score -= 10
-            reasons.append("Completeness: Date Issued ontbreekt; dit is nodig voor tijdigheidsanalyse.")
-
-        for field in ["project_id", "document_type", "access_tier", "client", "status"]:
-            value = str(item.get(field, "")).strip().lower()
-            if value in self.PLACEHOLDERS:
-                score -= 20
-                reasons.append(
-                    f"Completeness: metadataveld '{field}' bevat een placeholder-waarde ('{value}')."
-                )
-                break
+        if any(word in self.PLACEHOLDERS for word in stem_words if word):
+            score -= 20
+            reasons.append("Completeness: bestandsnaam bevat placeholder-achtige termen.")
 
         return max(score, 0), reasons
 
-    # =========================================================================
-    # CONSISTENCY  (NATO §6)
-    # =========================================================================
+    # ------------------------------------------------------------------
+    # Consistency
+    # ------------------------------------------------------------------
 
     def _check_consistency(self, item):
-        """
-        NATO §6:
-        - Naamgevingsconventie consistent (NATO-formaat of datum-prefix)
-        - Extensie passend voor de locatie (SP vs. lokaal)
-        - Geen dubbele spaties of meerdere punten (legacy check)
-        - Geen handmatige versiepatronen ('Copy of', '_v2') — dupliceert Uniqueness
-          maar benadrukt het consistency-aspect (naam ≠ werkelijkheid)
-        """
         score = 100
         reasons = []
 
         filename = item.get("name", "")
-        extension = item.get("extension", "")
-        mode = item.get("mode", "")
         stem = os.path.splitext(filename)[0]
-        is_nato = bool(self.NATO_NAMING_PATTERN.match(filename))
+        normalized = filename.lower()
 
-        # Naamgevingsconventie consistent?
-        has_date_prefix = any(p.match(filename) for p in self.DATE_PREFIX_PATTERNS)
-        if not is_nato and not has_date_prefix:
-            score -= 40
-            reasons.append("Consistency: bestand volgt geen consistente naamgevingsconventie.")
+        has_date_prefix = any(pattern.match(filename) for pattern in self.DATE_PREFIX_PATTERNS)
+        if not has_date_prefix:
+            score -= 25
+            reasons.append("Consistency: bestandsnaam mist een consistente datum-prefix (YYYYMMDD of YYYY-MM-DD).")
 
-        # Cross-field vergelijking met metadatavelden
-        parsed = self._parse_nato_filename(filename)
-        if parsed and item.get("project_id") and parsed.get("project_cycle") and str(item["project_id"]) != parsed["project_cycle"]:
-            score -= 20
-            reasons.append("Consistency: Project ID in bestandsnaam komt niet overeen met metadata.")
-
-        # SharePoint: ongebruikelijke extensies (§6 cross-dataset)
-        if mode == "sp" and extension not in {".docx", ".xlsx", ".pptx", ".pdf", ".txt"}:
-            score -= 30
-            reasons.append(f"Consistency: extensie {extension} is ongebruikelijk voor SharePoint-opslag.")
-
-        # Dubbele spaties
         if "  " in filename:
             score -= 15
             reasons.append("Consistency: bestandsnaam bevat dubbele spaties.")
 
-        # Meerdere punten (niet voor NATO-formaat dat punten vereist)
-        if not is_nato and filename.count(".") > 1:
-            score -= 15
+        if filename.count(".") > 1:
+            score -= 10
             reasons.append("Consistency: bestandsnaam bevat meerdere punten.")
 
-        # §6.1: Handmatig versiebeheer-patronen
-        for pat in self.MANUAL_VERSION_PATTERNS:
-            if pat.search(stem):
-                score -= 25
-                reasons.append(
-                    "Consistency: bestandsnaam bevat handmatig versiebeheer-patroon "
-                    "('Copy of', '_v2', '(1)', etc.) — inkonsistentie met versiebeheerbeleid."
-                )
+        if any(word in normalized for word in self.BAD_NAME_WORDS):
+            score -= 20
+            reasons.append("Consistency: bestandsnaam bevat tijdelijke/vage termen.")
+
+        for pattern in self.MANUAL_VERSION_PATTERNS:
+            if pattern.search(stem):
+                score -= 30
+                reasons.append("Consistency: handmatig versiebeheerpatroon gedetecteerd in bestandsnaam.")
                 break
 
         return max(score, 0), reasons
 
-    # =========================================================================
-    # UNIQUENESS  (NATO §8)
-    # =========================================================================
+    # ------------------------------------------------------------------
+    # Uniqueness
+    # ------------------------------------------------------------------
 
     def _check_uniqueness(self, item):
-        """
-        NATO §8:
-        - Cross-locatie duplicaat (bestaand, via is_duplicate flag)
-        - Manueel versiebeheer detectie: 'Copy of', '_v2', '_FINAL_FINAL', '(1)'
-          → indicate manual copies outside SharePoint versioning
-        """
+        """Alleen naamgedrag; bron-duplicatie wordt in CentraleEngine afgehandeld."""
         score = 100
         reasons = []
+        stem = os.path.splitext(item.get("name", ""))[0]
 
-        filename = item.get("name", "")
-        stem = os.path.splitext(filename)[0]
-
-        # §8.1 / §8.2: Bestand bestaat op meerdere locaties
-        if item.get("is_exact_duplicate", False) or item.get("duplicate_type") == "exact":
-            score -= 80
-            reasons.append("Uniqueness: exact duplicaat gedetecteerd via hash of naam.")
-        elif item.get("is_duplicate", False):
-            score -= 50
-            reasons.append("Uniqueness: bestandsnaam komt op meerdere locaties of modi voor.")
-
-        if item.get("is_near_duplicate", False) or item.get("duplicate_type") == "near":
-            score -= 40
-            reasons.append("Uniqueness: near-duplicaat gedetecteerd via tekst- of naamsovereenkomst.")
-
-        # §8.2 Name-pattern detectie voor handmatig versiebeheer
-        for pat in self.MANUAL_VERSION_PATTERNS:
-            if pat.search(stem):
-                score -= 50
-                reasons.append(
-                    "Uniqueness: bestandsnaam bevat manueel versiebeheer-patroon "
-                    "('Copy of', '_v2', '_FINAL_FINAL', '(1)', etc.). "
-                    "Gebruik SharePoint versiebeheer in plaats van handmatige kopieën."
-                )
+        for pattern in self.MANUAL_VERSION_PATTERNS:
+            if pattern.search(stem):
+                score -= 60
+                reasons.append("Uniqueness: bestandsnaam duidt op handmatige kopie/versie in plaats van centraal versiebeheer.")
                 break
 
         return max(score, 0), reasons
 
-    # =========================================================================
-    # TIMELINESS  (NATO §4 - Composite Model)
-    # =========================================================================
+    # ------------------------------------------------------------------
+    # Timeliness
+    # ------------------------------------------------------------------
 
     def _check_timeliness(self, item):
-        """
-        NATO §4 Composite Timeliness Model:
-
-        Categorie          | Verwachte versheid    | Drempelwaarden
-        ── Point-in-time   | Eenmalig afgerond     | Altijd score 100 na afronding
-        ── Living          | Regelmatig bijgehouden | >180 dagen → 50, >365 dagen → 0
-        ── Reference       | Periodiek herzien     | >365 dagen → 50, >730 dagen → 0
-        ── Onbekend        | Standaard leeftijd    | >3 jaar → 50, >5 jaar → 0
-
-        Kernprincipe: timeliness gaat over levenscyclusgeschiktheid, NIET pure leeftijd.
-        Een 5 jaar oud contract is volledig 'timely' als het nog van kracht is.
-        """
+        """Versheid van informatie, niet retentie of wettelijke bewaartermijn."""
         filename = item.get("name", "").lower()
         stem = os.path.splitext(filename)[0]
 
-        modified_dt = None
-        try:
-            if item["mode"] == "local":
-                ts = os.path.getmtime(item["path"])
-                modified_dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()
-            elif item["mode"] == "sp" and item.get("time_modified"):
-                modified_dt = item["time_modified"]
-        except Exception:
-            pass
-
+        modified_dt = self._get_modified_datetime(item)
         if not modified_dt:
             return 50, ["Timeliness: wijzigingsdatum kon niet worden bepaald."]
 
         now = datetime.now(tz=modified_dt.tzinfo)
         age_days = (now - modified_dt).days
 
-        if item.get("distinct_user_access_count", 0) >= 5:
-            return 100, [
-                "Timeliness: document wordt nog regelmatig geraadpleegd door meerdere gebruikers."
-            ]
-
-        # Prioriteit voor definitieve status en review metadata
         status = str(item.get("status", "")).lower()
-        if status in {"final", "archived", "definitief", "afgesloten"}:
-            return 100, ["Timeliness: document is gemarkeerd als definitief/archived."]
-
-        last_reviewed = item.get("last_reviewed")
-        review_interval = item.get("review_interval_days")
-        if last_reviewed and review_interval:
-            reviewed_dt = self._parse_date(last_reviewed)
-            try:
-                interval_days = int(review_interval)
-            except (TypeError, ValueError):
-                interval_days = None
-
-            if reviewed_dt and interval_days:
-                days_since_review = (now - reviewed_dt).days
-                if days_since_review > interval_days * 2:
-                    return 50, [
-                        "Timeliness: document is langer dan twee keer de verwachte review-interval niet herzien."
-                    ]
-                if days_since_review > interval_days:
-                    return 75, [
-                        "Timeliness: document is niet binnen de verwachte reviewperiode herzien."
-                    ]
-
-        # Categoriseer document op basis van naam-indicatoren
-        is_point_in_time = any(ind in stem for ind in self.POINT_IN_TIME_INDICATORS)
-        is_living = any(ind in stem for ind in self.LIVING_DOC_INDICATORS)
-        is_reference = any(ind in stem for ind in self.REFERENCE_DOC_INDICATORS)
-
-        # §4.3.1 Point-in-time: eenmaal definitief = altijd actueel
-        if is_point_in_time:
+        if status in {"final", "definitief", "archived", "afgesloten"}:
             return 100, []
 
-        # §4.3.1 Living documents: actief bijgehouden
-        if is_living:
+        if any(indicator in stem for indicator in self.POINT_IN_TIME_INDICATORS):
+            return 100, []
+
+        if any(indicator in stem for indicator in self.LIVING_DOC_INDICATORS):
             if age_days > 365:
-                return 0, ["Timeliness: actief document is meer dan 1 jaar niet bijgewerkt — mogelijk verouderd."]
-            elif age_days > 180:
-                return 50, ["Timeliness: actief document is meer dan 6 maanden niet bijgewerkt."]
+                return 0, ["Timeliness: levend document is >365 dagen niet bijgewerkt."]
+            if age_days > 180:
+                return 50, ["Timeliness: levend document is >180 dagen niet bijgewerkt."]
             return 100, []
 
-        # §4.3.1 Reference documents: periodiek herzien
-        if is_reference:
-            if age_days > 2 * 365:
-                return 0, ["Timeliness: referentiedocument is meer dan 2 jaar niet herzien."]
-            elif age_days > 365:
-                return 50, ["Timeliness: referentiedocument is meer dan 1 jaar niet herzien."]
+        if any(indicator in stem for indicator in self.REFERENCE_DOC_INDICATORS):
+            if age_days > 730:
+                return 0, ["Timeliness: referentiedocument is >730 dagen niet herzien."]
+            if age_days > 365:
+                return 50, ["Timeliness: referentiedocument is >365 dagen niet herzien."]
             return 100, []
 
-        # Standaard (onbekend documenttype): basisdrempels
-        if age_days > 5 * 365:
-            return 0, ["Timeliness: bestand is ouder dan 5 jaar."]
-        elif age_days > 3 * 365:
-            return 50, ["Timeliness: bestand is ouder dan 3 jaar."]
+        if age_days > 365:
+            return 50, ["Timeliness: document is langer dan 365 dagen niet bijgewerkt."]
         return 100, []
 
-    # =========================================================================
-    # GRANULARITY  (NATO §9)
-    # =========================================================================
+    # ------------------------------------------------------------------
+    # Granularity
+    # ------------------------------------------------------------------
 
     def _check_granularity(self, item):
-        """
-        NATO §9:
-        - Mapdiepte (bestaand)
-        - Generieke bestandsnamen (uitgebreide lijst)
-        - Datumgranulariteit: alleen jaarvermelding (2026) is onvoldoende detail
-        """
         score = 100
         reasons = []
 
@@ -662,145 +323,113 @@ class KwaliteitEngine:
         filename = item.get("name", "").lower()
         stem = os.path.splitext(filename)[0]
 
-        # Mapdiepte
         if depth > self.MAX_FOLDER_DEPTH:
-            score -= 50
+            score -= 40
             reasons.append(f"Granularity: bestand zit te diep in de structuur ({depth} niveaus).")
 
-        # Generieke namen — uitgebreid o.b.v. NATO §9
         generic_names = {
-            "document", "bestand", "file", "new", "nieuw",
-            "rapport", "report", "bijlage", "attachment",
-            "onbekend", "unknown", "overig", "diversen", "misc"
+            "document",
+            "bestand",
+            "file",
+            "new",
+            "nieuw",
+            "rapport",
+            "report",
+            "bijlage",
+            "attachment",
+            "onbekend",
+            "unknown",
+            "overig",
+            "diversen",
+            "misc",
         }
         if stem in generic_names:
             score -= 50
-            reasons.append("Granularity: bestandsnaam is te generiek om classificatie mogelijk te maken.")
+            reasons.append("Granularity: bestandsnaam is te generiek.")
 
-        # §9.1 Datumgranulariteit: naam bevat alleen een jaaraanduiding
         year_only = re.search(r"(?<!\d)(20\d{2})(?!\d)", stem)
-        has_full_date = (
-            any(p.match(filename) for p in self.DATE_PREFIX_PATTERNS)
-            or bool(self.NATO_NAMING_PATTERN.match(filename))
-        )
+        has_full_date = any(pattern.match(filename) for pattern in self.DATE_PREFIX_PATTERNS)
         if year_only and not has_full_date:
-            score -= 25
-            reasons.append(
-                "Granularity: bestandsnaam bevat alleen een jaar (bijv. '2026') "
-                "zonder volledige datum — te weinig granulariteit per NATO §9."
-            )
+            score -= 20
+            reasons.append("Granularity: bestandsnaam bevat alleen een jaaraanduiding zonder volledige datum.")
 
         return max(score, 0), reasons
 
-    # =========================================================================
-    # ACCURACY  (NATO §7)
-    # =========================================================================
+    # ------------------------------------------------------------------
+    # Accuracy
+    # ------------------------------------------------------------------
 
     def _check_accuracy(self, item):
-        """
-        NATO §7 — wat geautomatiseerd kan worden:
-        - Date logic: datum in bestandsnaam vs. werkelijke wijzigingsdatum
-        - Structuurcontrole: naam zonder extensie
-        - §5.2.3 Content-type heuristiek: documenttype code vs. extensie kruiscontrole
-        """
         score = 100
         reasons = []
 
         filename = item.get("name", "")
-        extension = item.get("extension", "")
-        stem = os.path.splitext(filename)[0]
-        modified_dt = None
+        modified_dt = self._get_modified_datetime(item)
 
-        # 1. Naam zonder extensie — structureel onbetrouwbaar
-        if filename and not extension:
-            score -= 30
-            reasons.append(
-                "Accuracy: bestandsstructuur is onvolledig, "
-                "waardoor interpretatie onbetrouwbaar wordt."
-            )
+        if not modified_dt:
+            return 50, ["Accuracy: wijzigingsdatum ontbreekt; datumcontrole beperkt."]
 
-        # 2. Haal wijzigingsdatum op
-        try:
-            if item.get("mode") == "local":
-                ts = os.path.getmtime(item["path"])
-                modified_dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()
-            elif item.get("mode") == "sp" and item.get("time_modified"):
-                modified_dt = item["time_modified"]
-        except Exception:
-            modified_dt = None
+        for pattern in self.DATE_PREFIX_PATTERNS:
+            match = pattern.match(filename)
+            if not match:
+                continue
 
-        # 3. Datum in bestandsnaam vs. wijzigingsdatum (NATO §7.1 date logic)
-        if modified_dt:
-            for pattern in self.DATE_PREFIX_PATTERNS:
-                match = pattern.match(filename)
-                if not match:
-                    continue
+            raw_date = match.group(1)
+            try:
+                if "-" in raw_date:
+                    name_dt = datetime.strptime(raw_date, "%Y-%m-%d")
+                else:
+                    name_dt = datetime.strptime(raw_date, "%Y%m%d")
 
-                raw_date = match.group(1)
-                try:
-                    if "-" in raw_date:
-                        name_dt = datetime.strptime(raw_date, "%Y-%m-%d")
-                    else:
-                        name_dt = datetime.strptime(raw_date, "%Y%m%d")
-
-                    delta_days = abs((modified_dt.date() - name_dt.date()).days)
-
-                    if delta_days > 365:
-                        score -= 50
-                        reasons.append(
-                            "Accuracy: datum in bestandsnaam wijkt sterk af van de wijzigingsdatum "
-                            f"({delta_days} dagen verschil)."
-                        )
-                    elif delta_days > 30:
-                        score -= 20
-                        reasons.append(
-                            "Accuracy: datum in bestandsnaam wijkt af van de wijzigingsdatum "
-                            f"({delta_days} dagen verschil)."
-                        )
-                except ValueError:
+                delta_days = abs((modified_dt.date() - name_dt.date()).days)
+                if delta_days > 365:
+                    score -= 50
+                    reasons.append(f"Accuracy: datum in bestandsnaam wijkt sterk af van wijzigingsdatum ({delta_days} dagen).")
+                elif delta_days > 30:
                     score -= 20
-                    reasons.append("Accuracy: datum in bestandsnaam heeft een ongeldig formaat.")
-                break
-
-        # 4. §5.2.3 Content-type kruiscontrole: type code vs. extensie
-        nato_match = self.NATO_NAMING_PATTERN.match(filename)
-        if nato_match:
-            parts = stem.split("-")
-            if len(parts) >= 2:
-                type_code = parts[1].upper()
-
-                # Documenten (INV/CON/RPT/LET/MIN) mogen geen data-extensie hebben
-                if type_code in {"INV", "CON", "RPT", "LET", "MIN"} and extension in {".xlsx", ".csv", ".json"}:
-                    score -= 20
-                    reasons.append(
-                        f"Accuracy: documenttype '{type_code}' is een tekstdocument "
-                        f"maar heeft een data-extensie ({extension})."
-                    )
-
-                # Templates en policies mogen geen afbeelding/uitvoerbaar bestand zijn
-                if type_code in {"TEM", "POL"} and extension in {".jpg", ".png", ".gif", ".exe", ".bat"}:
-                    score -= 30
-                    reasons.append(
-                        f"Accuracy: documenttype '{type_code}' heeft een onverwachte extensie ({extension})."
-                    )
+                    reasons.append(f"Accuracy: datum in bestandsnaam wijkt af van wijzigingsdatum ({delta_days} dagen).")
+            except ValueError:
+                score -= 20
+                reasons.append("Accuracy: datum-prefix in bestandsnaam heeft ongeldig formaat.")
+            break
 
         return max(score, 0), reasons
 
-    # =========================================================================
-    # HULPFUNCTIES
-    # =========================================================================
+    # ------------------------------------------------------------------
+    # Hulpfuncties
+    # ------------------------------------------------------------------
+
+    def _get_modified_datetime(self, item):
+        try:
+            if item.get("mode") == "local":
+                ts = os.path.getmtime(item["path"])
+                return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()
+
+            if item.get("mode") == "sp" and item.get("time_modified"):
+                raw = item.get("time_modified")
+                if isinstance(raw, datetime):
+                    return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+
+                raw_str = str(raw)
+                for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                    try:
+                        parsed = datetime.strptime(raw_str, fmt)
+                        return parsed.replace(tzinfo=timezone.utc)
+                    except ValueError:
+                        continue
+        except Exception:
+            return None
+        return None
 
     def _calculate_depth(self, item):
         path_value = item.get("path", "")
 
         if item.get("mode") == "local":
             rel = os.path.relpath(path_value, item["root_source"])
-            parts = rel.split(os.sep)
-            return max(len(parts) - 1, 0)
+            return max(len(rel.split(os.sep)) - 1, 0)
 
         if item.get("mode") == "sp":
             sp_path = path_value.replace("SP: ", "")
-            parts = sp_path.split("/")
-            return max(len(parts) - 2, 0)
+            return max(len(sp_path.split("/")) - 2, 0)
 
         return 0
