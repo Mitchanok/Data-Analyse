@@ -20,39 +20,54 @@ COLOR_ACCENT = "#cf9d1f"
 COLOR_BG_DEEP = "#001538" 
 COLOR_BG_LIGHT = "#1a2b4b" 
 
-# === KWALITEIT DIMENSIE METADATA ===
+# === KWALITEIT: GROEPEN EN SIMPELE TESTNAMEN ===
 UI_QUALITY_GROUPS = {
-    "Betrouwbaarheid\n& Validiteit": {
-        "tooltip": (
-            "Betrouwbaarheid & Validiteit\n"
-            "Controleert de nauwkeurigheid van data (bijv. datums in naam)\n"
-            "en of de structuur, padlengte en naamgeving geldig zijn."
-        ),
+    "Naam en structuur": {
+        "tooltip": "Regels voor naam, mapstructuur en algemene bestandsopbouw.",
         "dimensions": ["Accuracy", "Consistency", "Validity"]
     },
-    "Volledigheid\n& Structuur": {
-        "tooltip": (
-            "Volledigheid\n"
-            "Detecteert ontbrekende metadata (geen extensie, geen naam)\n"
-            "en controleert of bestanden daadwerkelijk inhoud hebben."
-        ),
+    "Inhoud compleet": {
+        "tooltip": "Regels die controleren of een bestand bruikbaar en niet leeg is.",
         "dimensions": ["Completeness"]
     },
-    "Uniciteit\n& Detail": {
-        "tooltip": (
-            "Uniciteit & Granulariteit\n"
-            "Spoort dubbele documenten op in en over bronnen heen en\n"
-            "evalueert of de bestandsnaam specifiek genoeg is."
-        ),
+    "Dubbelingen en detail": {
+        "tooltip": "Regels voor dubbele naam-patronen en voldoende specifieke bestandsnamen.",
         "dimensions": ["Uniqueness", "Granularity"]
     },
-    "Tijdigheid\n& Actualiteit": {
-        "tooltip": (
-            "Tijdigheid\n"
-            "Analyseert de levensduur en wijzigingsdatum van bestanden\n"
-            "om sterk verouderde data (>3 of >5 jaar) in kaart te brengen."
-        ),
+    "Actualiteit": {
+        "tooltip": "Regels voor recente updates en document-actualiteit.",
         "dimensions": ["Timeliness"]
+    }
+}
+
+UI_QUALITY_TESTS = {
+    "Accuracy": {
+        "label": "Datum in naam klopt",
+        "tooltip": "Controleert of de datum in de bestandsnaam logisch is t.o.v. de wijzigingsdatum."
+    },
+    "Consistency": {
+        "label": "Naam is consequent",
+        "tooltip": "Controleert vaste naamopbouw, geen dubbele spaties en geen handmatige versie-patronen."
+    },
+    "Validity": {
+        "label": "Pad en basisstructuur geldig",
+        "tooltip": "Controleert padlengte, mapdiepte en minimale geldigheid van naam/extensie."
+    },
+    "Completeness": {
+        "label": "Bestand is volledig",
+        "tooltip": "Controleert of naam/extensie aanwezig zijn en het bestand niet leeg of bijna leeg is."
+    },
+    "Uniqueness": {
+        "label": "Geen handmatige kopie-versies",
+        "tooltip": "Zoekt naar patronen zoals 'copy of', '(1)' of '_v2' in bestandsnamen."
+    },
+    "Granularity": {
+        "label": "Naam heeft genoeg detail",
+        "tooltip": "Controleert of de bestandsnaam niet te generiek is en voldoende detail bevat."
+    },
+    "Timeliness": {
+        "label": "Document is actueel",
+        "tooltip": "Controleert of het document recent genoeg is bijgewerkt voor het documenttype."
     }
 }
 
@@ -60,6 +75,12 @@ UI_COMPLIANCE_GROUPS = {
     "Metadata": "Controleert op de aanwezigheid van verplichte of verwachte metadata en eigenschappen binnen documenten.",
     "Rubricering": "Verifieert of documenten voorzien zijn van de correcte vertrouwelijkheidslabels en veiligheidsrubriceringen.",
     "Bewaartermijn": "Controleert de retentieperiode en identificeert bestanden waarvan de wettelijke of interne bewaartermijn is verstreken."
+}
+
+UI_COMPLIANCE_LABELS = {
+    "Metadata": "Documenteigenschappen aanwezig",
+    "Rubricering": "Classificatie staat op document",
+    "Bewaartermijn": "Retentie nog geldig",
 }
 
 
@@ -213,7 +234,13 @@ class ComplianceApp(TkinterDnD_CTk):
             text_color=COLOR_ACCENT
         ).pack(anchor="w", padx=20, pady=(15, 10))
 
-        self._build_module_group("Compliance", UI_COMPLIANCE_GROUPS, self.compliance_frame, add_header=False)
+        self._build_module_group(
+            "Compliance",
+            UI_COMPLIANCE_GROUPS,
+            self.compliance_frame,
+            add_header=False,
+            label_map=UI_COMPLIANCE_LABELS
+        )
 
         # Quality blok
         self.quality_frame = ctk.CTkFrame(
@@ -233,9 +260,23 @@ class ComplianceApp(TkinterDnD_CTk):
         ).pack(anchor="w", padx=20, pady=(15, 10))
 
         for group_name, group_info in UI_QUALITY_GROUPS.items():
-            self._build_module_group(group_name, {dim: group_info["tooltip"] for dim in group_info["dimensions"]}, self.quality_frame, add_header=True)
+            modules_dict = {
+                dim: UI_QUALITY_TESTS.get(dim, {}).get("tooltip", group_info["tooltip"])
+                for dim in group_info["dimensions"]
+            }
+            label_map = {
+                dim: UI_QUALITY_TESTS.get(dim, {}).get("label", dim)
+                for dim in group_info["dimensions"]
+            }
+            self._build_module_group(
+                group_name,
+                modules_dict,
+                self.quality_frame,
+                add_header=True,
+                label_map=label_map
+            )
 
-    def _build_module_group(self, group_name, modules_dict, parent, add_header=True):
+    def _build_module_group(self, group_name, modules_dict, parent, add_header=True, label_map=None):
         if add_header:
             # Groepsframe
             group_frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -285,13 +326,14 @@ class ComplianceApp(TkinterDnD_CTk):
         for module_name, tooltip in modules_dict.items():
             var = ctk.BooleanVar(value=True)
             self.group_vars[module_name] = var
+            display_name = label_map.get(module_name, module_name) if label_map else module_name
 
             module_frame = ctk.CTkFrame(modules_container, fg_color="transparent")
             module_frame.pack(fill="x", pady=5)
 
             cb = ctk.CTkCheckBox(
                 module_frame,
-                text=module_name,
+                text=display_name,
                 variable=var,
                 font=("Segoe UI", 14),
                 checkbox_width=20,
